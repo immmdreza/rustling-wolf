@@ -1,24 +1,38 @@
-use std::{sync::mpsc::Receiver, thread, time::Duration};
+use std::future::Future;
+
+use tokio::sync::mpsc::Receiver;
 
 pub struct Transporter {}
 
 impl Transporter {
-    pub fn spawn<T, K>(receiver: Receiver<K>, callback: fn(K, &T) -> (), extra: T) -> ()
+    pub fn spawn<K, G, Gut, Args>(
+        name: String,
+        mut receiver: Receiver<K>,
+        callback: G,
+        args: Args,
+    ) -> tokio::task::JoinHandle<()>
     where
-        T: Send + 'static,
-        K: Send + 'static,
+        K: Sync + Send + 'static,
+        G: FnOnce(K, Args) -> Gut + Send + Copy + 'static,
+        Gut: Future<Output = ()> + Send,
+        Args: Sync + Send + Clone + 'static,
     {
-        thread::spawn(move || loop {
+        let spawned = tokio::spawn(async move {
             loop {
-                let received = receiver.recv();
+                let received = receiver.recv().await;
                 match received {
-                    Ok(received) => {
-                        callback(received, &extra);
+                    Some(received) => {
+                        callback(received, args.to_owned()).await;
                         continue;
                     }
-                    Err(_) => break,
+                    None => {
+                        println!("A transporter is down ... ( {} )", name);
+                        return;
+                    }
                 }
             }
         });
+
+        spawned
     }
 }

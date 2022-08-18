@@ -1,4 +1,8 @@
+use std::time::Duration;
+
+#[derive(Debug)]
 pub enum VillageInlet {
     RawString(String),
-    AddPlayer,
+    AddPerson,
+    ExtendPopulationTime(Duration),
 }
