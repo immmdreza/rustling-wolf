@@ -8,6 +8,8 @@ use mongodb::{options::ClientOptions, Client};
 use rand::prelude::*;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+use crate::console_answer;
+
 use self::village::{
     outlet_data::VillageOutlet,
     periods::{Period, RawPeriod},
@@ -36,6 +38,42 @@ pub enum WorldInlet {
     },
     ListVillages,
     NewVillage,
+}
+
+pub trait QuickResolver<T, F> {
+    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
+    where
+        F: FnOnce(T) -> WorldInlet;
+}
+
+impl<T, F> QuickResolver<T, F> for Option<T> {
+    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
+    where
+        F: FnOnce(T) -> WorldInlet,
+    {
+        match self {
+            Some(target) => on_some(target),
+            None => {
+                console_answer!("{}", msg);
+                WorldInlet::None
+            }
+        }
+    }
+}
+
+impl<T, F, U> QuickResolver<T, F> for Result<T, U> {
+    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
+    where
+        F: FnOnce(T) -> WorldInlet,
+    {
+        match self {
+            Ok(target) => on_some(target),
+            Err(_) => {
+                console_answer!("{}", msg);
+                WorldInlet::None
+            }
+        }
+    }
 }
 
 pub struct World {
