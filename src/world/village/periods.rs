@@ -42,10 +42,12 @@ impl RawPeriod {
             Ending => Err(()),
         }
     }
+}
 
-    pub fn to_num(&self) -> i32 {
+impl Into<i32> for RawPeriod {
+    fn into(self) -> i32 {
         use RawPeriod::*;
-        match *self {
+        match self {
             None => 0,
             Populating => 1,
             Assignments => 2,
@@ -53,10 +55,12 @@ impl RawPeriod {
             Ending => 4,
         }
     }
+}
 
-    pub fn from_num(num: i32) -> Self {
+impl From<i32> for RawPeriod {
+    fn from(i: i32) -> Self {
         use RawPeriod::*;
-        match num {
+        match i {
             0 => None,
             1 => Populating,
             2 => Assignments,

@@ -10,7 +10,7 @@ model! {
     }
 }
 
-pub(crate) async fn get_village_period(client: &Client, village_id: &String) -> Option<RawPeriod> {
+pub(crate) async fn get_village_period(client: &Client, village_id: &str) -> Option<RawPeriod> {
     let db = client.database("rustling");
     // Get a handle to a collection in the database.
     let collection = db.collection::<VillagePeriod>("village_periods");
@@ -20,14 +20,14 @@ pub(crate) async fn get_village_period(client: &Client, village_id: &String) -> 
         .await
         .unwrap()
     {
-        Some(vp) => Some(RawPeriod::from_num(vp.period)),
+        Some(vp) => Some(vp.period.into()),
         None => None,
     }
 }
 
 pub(crate) async fn set_or_update_village_period(
     client: &Client,
-    village_id: &String,
+    village_id: &str,
     period: &RawPeriod,
 ) {
     let db = client.database("rustling");
@@ -43,7 +43,7 @@ pub(crate) async fn set_or_update_village_period(
             collection
                 .update_one(
                     doc! {"village_id": village_id.clone()},
-                    doc! {"$set": {"period": period.to_num()}},
+                    doc! {"$set": {"period": (*period) as i32}},
                     None,
                 )
                 .await
@@ -53,7 +53,7 @@ pub(crate) async fn set_or_update_village_period(
             // Insert some documents into the "mydb.books" collection.
             collection
                 .insert_one(
-                    VillagePeriod::new(village_id.to_string(), period.to_num()),
+                    VillagePeriod::new(village_id.to_string(), (*period).into()),
                     None,
                 )
                 .await
@@ -64,7 +64,7 @@ pub(crate) async fn set_or_update_village_period(
 
 pub(crate) async fn cleanup_village_period(
     client: &Client,
-    village_id: &String,
+    village_id: &str,
 ) -> Result<mongodb::results::DeleteResult, mongodb::error::Error> {
     let db = client.database("rustling");
     // Get a handle to a collection in the database.

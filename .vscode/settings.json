@@ -5,6 +5,7 @@
         "bson",
         "Civita",
         "Crossable",
+        "Deque",
         "Fenghuang",
         "ftype",
         "Marburg",

@@ -27,6 +27,10 @@ pub enum WorldInlet {
         village_id: String,
         person_name: String,
     },
+    FillPersons {
+        village_id: String,
+        count: u8,
+    },
     KillVillage {
         village_id: String,
     },
@@ -182,6 +186,12 @@ impl World {
                     }
                     WorldInlet::NewVillage => {
                         self.create_village_default_receiver(None, defaults::default_period_maker);
+                    }
+                    WorldInlet::FillPersons { village_id, count } => {
+                        let village = self.villages.get(&village_id).unwrap();
+                        for i in 0..count {
+                            village.add_player(&format!("Player {}", i)).await.unwrap();
+                        }
                     }
                 },
                 None => (),

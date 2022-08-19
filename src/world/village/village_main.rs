@@ -6,7 +6,8 @@ use tokio::{sync::mpsc, task::JoinHandle, time::timeout};
 use crate::{
     mongo_fns::world::{
         person::{
-            add_person_to_village, cleanup_persons, count_village_persons, person_name_exists,
+            add_person_to_village, assign_roles, cleanup_persons, count_village_persons,
+            person_name_exists,
         },
         village::{cleanup_village_period, get_village_period, set_or_update_village_period},
     },
@@ -41,8 +42,7 @@ async fn received(
         VillageInlet::AddPerson(name) => match get_village_period(&client, &village_id).await {
             Some(period) => match period {
                 RawPeriod::Populating => {
-                    let current_person_count =
-                        count_village_persons(&client, village_id.clone()).await;
+                    let current_person_count = count_village_persons(&client, &village_id).await;
                     if current_person_count < max_persons.into() {
                         if person_name_exists(&client, &village_id, &name).await {
                             sender
@@ -126,24 +126,24 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
     println!("Transporter spawned!");
 
     let mut current_raw_period = RawPeriod::None;
-    let mut current_period = (info.period_maker)(&current_raw_period);
+    let mut _current_period = (info.period_maker)(&current_raw_period);
 
     loop {
         current_raw_period = match current_raw_period.cross() {
             Ok(cur) => cur,
             Err(_) => break,
         };
-        current_period = (info.period_maker)(&current_raw_period);
+        _current_period = (info.period_maker)(&current_raw_period);
         set_or_update_village_period(&info.client, &info.village_id, &current_raw_period).await;
         info.sender
             .send(VillageOutlet::PeriodCrossed(
                 current_raw_period,
-                current_period,
+                _current_period,
             ))
             .await
             .unwrap();
 
-        match current_period {
+        match _current_period {
             Period::None => break,
             Period::Populating {
                 min_persons,
@@ -198,7 +198,7 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
                         // Timed out! ask the callback for gathered players
                         Err(_) => {
                             let current_joined =
-                                count_village_persons(&info.client, info.village_id.clone()).await;
+                                count_village_persons(&info.client, &info.village_id).await;
 
                             if current_joined < min_persons.into() {
                                 info.sender
@@ -223,6 +223,17 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
                 }
             }
             Period::Assignments(_) => loop {
+                let roles = assign_roles(&info.client, &info.village_id).await.unwrap();
+                info.sender
+                    .send(VillageOutlet::RawString(format!(
+                        "Roles assigned: {:#?}.",
+                        roles
+                    )))
+                    .await
+                    .unwrap();
+                break;
+            },
+            Period::DaytimeCycle(_) => loop {
                 match w_tr.recv().await {
                     Some(data) => match data {
                         VillageInternal::Die => {
@@ -235,7 +246,6 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
                     None => todo!(),
                 }
             },
-            Period::DaytimeCycle(_) => todo!(),
             Period::Ending => todo!(),
         }
     }

@@ -42,7 +42,7 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 RawPeriod::Assignments => {
                     let joined_persons = count_village_persons(
                         &simp_village.village.client,
-                        simp_village.get_village_id().to_string(),
+                        simp_village.get_village_id(),
                     )
                     .await;
                     println!(
