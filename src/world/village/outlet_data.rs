@@ -1,4 +1,4 @@
-use super::periods::RawPeriod;
+use super::periods::{Period, RawPeriod};
 
 #[derive(Debug)]
 pub enum AddPersonResult {
@@ -14,6 +14,6 @@ pub enum VillageOutlet {
     RawString(String),
     AddPerson(AddPersonResult),
     PeriodReady(RawPeriod),
-    PeriodCrossed(RawPeriod),
+    PeriodCrossed(RawPeriod, Period),
     PopulatingTimedOut,
 }

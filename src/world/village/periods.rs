@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum AssignmentMode {
     Normal,
 }
@@ -66,7 +66,7 @@ impl RawPeriod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Period {
     None,
     Populating {

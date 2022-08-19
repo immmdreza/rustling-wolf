@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use tokio::sync::mpsc::error::SendError;
 
-use crate::{prelude::VillageInlet, world::WorldInlet};
+use crate::world::WorldInlet;
 
-use super::Village;
+use super::{inlet_data::VillageInlet, Village};
 
 #[derive(Clone)]
 pub struct SimplifiedVillage {
@@ -31,8 +31,10 @@ impl SimplifiedVillage {
     /// # Errors
     ///
     /// This function will return an error if .
-    pub async fn add_player(&self) -> Result<(), SendError<VillageInlet>> {
-        self.village.transmit(VillageInlet::AddPerson).await
+    pub async fn add_player(&self, name: &str) -> Result<(), SendError<VillageInlet>> {
+        self.village
+            .transmit(VillageInlet::AddPerson(name.to_string()))
+            .await
     }
 
     pub async fn extend_population_dur(
@@ -53,5 +55,9 @@ impl SimplifiedVillage {
             self.get_village_id().to_string(),
         ))
         .await
+    }
+
+    pub async fn die(&self) -> Result<(), SendError<VillageInlet>> {
+        self.village.transmit(VillageInlet::Die).await
     }
 }

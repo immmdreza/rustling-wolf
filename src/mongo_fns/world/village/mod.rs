@@ -1,13 +1,13 @@
 use mongodb::Client;
-use serde::{Deserialize, Serialize};
 
-use crate::world::village::periods::RawPeriod;
+use crate::{model, world::village::periods::RawPeriod};
 use mongodb::bson::doc;
 
-#[derive(Debug, Serialize, Deserialize)]
-struct VillagePeriod {
-    village_id: String,
-    period: i32,
+model! {
+    pub struct VillagePeriod {
+        village_id: String,
+        period: i32
+    }
 }
 
 pub(crate) async fn get_village_period(client: &Client, village_id: &String) -> Option<RawPeriod> {
@@ -53,10 +53,7 @@ pub(crate) async fn set_or_update_village_period(
             // Insert some documents into the "mydb.books" collection.
             collection
                 .insert_one(
-                    VillagePeriod {
-                        village_id: village_id.to_string(),
-                        period: period.to_num(),
-                    },
+                    VillagePeriod::new(village_id.to_string(), period.to_num()),
                     None,
                 )
                 .await

@@ -1,33 +1,34 @@
-use std::time::Duration;
-
 use rustling_wolf::{
-    prelude::*,
-    world::village::periods::{AssignmentMode, Daytime, Period, RawPeriod},
+    console::setup_console_receiver,
+    world::{World, WorldInlet},
 };
-
-fn default_period_maker(raw: &RawPeriod) -> Period {
-    match raw {
-        RawPeriod::Populating => Period::Populating {
-            min_persons: 5,
-            max_persons: 10,
-            max_dur: Duration::from_secs(5),
-        },
-        RawPeriod::Assignments => Period::Assignments(AssignmentMode::Normal),
-        RawPeriod::DaytimeCycle => Period::DaytimeCycle(|dt| match dt {
-            Daytime::MidNight => Duration::from_secs(30),
-            Daytime::SunRaise => Duration::from_secs(30),
-            Daytime::LynchTime => Duration::from_secs(30),
-        }),
-        RawPeriod::Ending => Period::Ending,
-        RawPeriod::None => Period::None,
-    }
-}
 
 #[tokio::main]
 async fn main() {
     let mut world = World::new().await;
 
-    let _ = world.create_village_default_receiver(None, default_period_maker);
+    let rx = setup_console_receiver(|s| {
+        let parts = s.split(' ').collect::<Vec<_>>();
+        let command = *parts.get(0).unwrap();
 
-    world.idle().await;
+        match command {
+            "list-villages" => WorldInlet::ListVillages,
+            "new-village" => WorldInlet::NewVillage,
+            "add-player" => {
+                let village_id = parts[1].to_string();
+                let person_name = parts[2].to_string();
+                WorldInlet::RequestPerson {
+                    village_id,
+                    person_name,
+                }
+            }
+            "kill" => {
+                let village_id = parts[1].to_string();
+                WorldInlet::KillVillage { village_id }
+            }
+            _ => WorldInlet::None,
+        }
+    });
+
+    world.idle(rx).await
 }

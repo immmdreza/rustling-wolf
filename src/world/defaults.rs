@@ -2,11 +2,14 @@ use std::time::Duration;
 
 use crate::{
     mongo_fns::world::person::count_village_persons,
-    prelude::{SimplifiedVillage, VillageOutlet},
-    world::village::periods::RawPeriod,
+    world::{village::periods::RawPeriod, WorldInlet},
 };
 
-use super::village::outlet_data::AddPersonResult;
+use super::village::{
+    outlet_data::{AddPersonResult, VillageOutlet},
+    periods::{AssignmentMode, Daytime, Period},
+    simplified_village::SimplifiedVillage,
+};
 
 pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: SimplifiedVillage) {
     match data {
@@ -23,9 +26,10 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 person_id,
                 current_count
             ),
-            AddPersonResult::Failed(_) => println!(
-                "[🌴 {}]: Failed creating person.",
+            AddPersonResult::Failed(err) => println!(
+                "[🌴 {}]: Failed creating person: {}.",
                 simp_village.get_village_name(),
+                err
             ),
         },
         VillageOutlet::PeriodReady(new_period) => {
@@ -50,22 +54,22 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 _ => (),
             }
         }
-        VillageOutlet::PeriodCrossed(crossed) => {
+        VillageOutlet::PeriodCrossed(crossed, detailed) => {
             println!(
                 "[🌴 {}]: Next period started: {:?}",
                 simp_village.get_village_name(),
                 crossed
             );
             match crossed {
-                RawPeriod::Populating => {
-                    simp_village.add_player().await.unwrap();
-
+                _ => {
                     simp_village
-                        .extend_population_dur(Duration::from_secs(10))
+                        .send_to_world(WorldInlet::NewPeriod {
+                            village_id: simp_village.get_village_id().clone(),
+                            period: detailed,
+                        })
                         .await
                         .unwrap();
                 }
-                _ => (),
             }
         }
         VillageOutlet::PopulatingTimedOut => {
@@ -75,5 +79,23 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 simp_village.get_village_name(),
             );
         }
+    }
+}
+
+pub(crate) fn default_period_maker(raw: &RawPeriod) -> Period {
+    match raw {
+        RawPeriod::Populating => Period::Populating {
+            min_persons: 5,
+            max_persons: 10,
+            max_dur: Duration::from_secs(300),
+        },
+        RawPeriod::Assignments => Period::Assignments(AssignmentMode::Normal),
+        RawPeriod::DaytimeCycle => Period::DaytimeCycle(|dt| match dt {
+            Daytime::MidNight => Duration::from_secs(30),
+            Daytime::SunRaise => Duration::from_secs(30),
+            Daytime::LynchTime => Duration::from_secs(30),
+        }),
+        RawPeriod::Ending => Period::Ending,
+        RawPeriod::None => Period::None,
     }
 }

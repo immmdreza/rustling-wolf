@@ -34,12 +34,14 @@ pub(super) struct VillageInfo {
 pub(super) enum VillageInternal {
     PersonsFilled,
     ExtendPopulationTime(Duration),
+    Die,
 }
 
 #[derive(Clone)]
 pub struct Village {
     village_id: String,
     village_name: String,
+    current_period: Period,
     pub(crate) sender: Sender<VillageInlet>,
     pub(crate) to_world_sender: Sender<WorldInlet>,
     pub(crate) client: Client,
@@ -64,6 +66,7 @@ impl Village {
         let village = Village {
             village_id: village_id.clone(),
             village_name: village_name.to_string(),
+            current_period: Period::None,
             sender: inlet_tx,
             to_world_sender,
             client: client.clone(),
@@ -100,5 +103,13 @@ impl Village {
 
     pub fn simplify(self) -> SimplifiedVillage {
         SimplifiedVillage::new(self)
+    }
+
+    pub fn get_current_period(&self) -> Period {
+        self.current_period
+    }
+
+    pub(crate) fn set_current_period(&mut self, period: Period) {
+        self.current_period = period;
     }
 }
