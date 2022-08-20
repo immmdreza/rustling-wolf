@@ -5,10 +5,10 @@ pub mod simplified_village;
 pub mod transports;
 mod village_main;
 
-use std::{future::Future, time::Duration};
+use std::future::Future;
 
 use mongodb::Client;
-use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
+use tokio::sync::mpsc::{channel, error::SendError, Sender};
 
 use self::{
     inlet_data::VillageInlet,
@@ -21,20 +21,13 @@ use self::{
 
 use super::WorldInlet;
 
+#[derive(Clone)]
 pub(super) struct VillageInfo {
     pub(super) client: Client,
     village_id: String,
     village_name: String,
-    receiver: Receiver<VillageInlet>,
     sender: Sender<VillageOutlet>,
     period_maker: fn(&RawPeriod) -> Period,
-}
-
-#[derive(Debug)]
-pub(super) enum VillageInternal {
-    PersonsFilled,
-    ExtendPopulationTime(Duration),
-    Die,
 }
 
 #[derive(Clone)]
@@ -86,12 +79,11 @@ impl Village {
             client,
             village_id,
             village_name: village_name.to_string(),
-            receiver: inlet_rx,
             sender: outlet_tx,
             period_maker,
         };
         tokio::spawn(async move {
-            village_main(info).await;
+            village_main(info, inlet_rx).await;
         });
 
         village

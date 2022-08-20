@@ -1,7 +1,11 @@
-use std::time::{Duration, Instant};
+use std::{future::Future, time::Duration};
 
 use mongodb::Client;
-use tokio::{sync::mpsc, task::JoinHandle, time::timeout};
+use tokio::{
+    sync::mpsc::{self, Receiver},
+    task::JoinHandle,
+    time::{timeout, Instant},
+};
 
 use crate::{
     mongo_fns::world::{
@@ -11,10 +15,7 @@ use crate::{
         },
         village::{cleanup_village_period, get_village_period, set_or_update_village_period},
     },
-    world::village::{
-        periods::{Period, RawPeriod},
-        VillageInternal,
-    },
+    world::village::periods::{Daytime, Period, RawPeriod},
 };
 
 use super::{
@@ -24,20 +25,54 @@ use super::{
     VillageInfo,
 };
 
+#[derive(Debug)]
+pub(super) enum VillageInternal {
+    PersonsFilled,
+    ExtendPopulationTime(Duration),
+    Die,
+}
+
+impl From<VillageInternal> for SafeVillageInternal {
+    fn from(vi: VillageInternal) -> Self {
+        match vi {
+            VillageInternal::PersonsFilled => SafeVillageInternal::PersonsFilled,
+            VillageInternal::ExtendPopulationTime(e) => {
+                SafeVillageInternal::ExtendPopulationTime(e)
+            }
+            VillageInternal::Die => panic!("SafeVillageInternal is suppose to filter this."),
+        }
+    }
+}
+
+enum SafeVillageInternal {
+    PersonsFilled,
+    ExtendPopulationTime(Duration),
+}
+
+enum InternalResult {
+    Break,
+    Return,
+    Continue,
+}
+
 async fn received(
     received: VillageInlet,
-    (client, village_id, sender, internal_sender, max_persons): (
-        Client,
-        String,
-        mpsc::Sender<VillageOutlet>,
-        mpsc::Sender<VillageInternal>,
-        u8,
-    ),
+    (
+        VillageInfo {
+            client,
+            village_id,
+            sender,
+            village_name: _,
+            period_maker: _,
+        },
+        internal_sender,
+        max_persons,
+    ): (VillageInfo, mpsc::Sender<VillageInternal>, u8),
 ) {
     match received {
         VillageInlet::RawString(s) => {
             println!("[🌏]: {}", s);
-            sender.send(VillageOutlet::RawString(s)).await.unwrap();
+            sender.send(VillageOutlet::RawString(s)).await.unwrap_or(());
         }
         VillageInlet::AddPerson(name) => match get_village_period(&client, &village_id).await {
             Some(period) => match period {
@@ -50,22 +85,39 @@ async fn received(
                                     "The person name is duplicated".to_string(),
                                 )))
                                 .await
-                                .unwrap();
+                                .unwrap_or(());
                         } else {
-                            add_person_to_village(&client, &village_id, name.as_str()).await;
-                            sender
-                                .send(VillageOutlet::AddPerson(AddPersonResult::Added {
-                                    person_id: uuid::Uuid::new_v4().to_string(),
-                                    current_count: current_person_count + 1,
-                                }))
-                                .await
-                                .unwrap();
+                            if let Some(pr) =
+                                add_person_to_village(&client, &village_id, name.as_str()).await
+                            {
+                                sender
+                                    .send(VillageOutlet::AddPerson(AddPersonResult::Added {
+                                        person_id: pr.get_id(),
+                                        current_count: current_person_count + 1,
+                                    }))
+                                    .await
+                                    .unwrap_or(());
+
+                                if current_person_count + 1 >= max_persons.into() {
+                                    internal_sender
+                                        .send(VillageInternal::PersonsFilled)
+                                        .await
+                                        .unwrap_or(());
+                                }
+                            } else {
+                                sender
+                                    .send(VillageOutlet::AddPerson(AddPersonResult::Failed(
+                                        "Error while inserting person.".to_string(),
+                                    )))
+                                    .await
+                                    .unwrap_or(());
+                            }
                         }
                     } else {
                         internal_sender
                             .send(VillageInternal::PersonsFilled)
                             .await
-                            .unwrap();
+                            .unwrap_or(());
                     }
                 }
                 _ => {
@@ -74,7 +126,7 @@ async fn received(
                             "Not populating!".to_string(),
                         )))
                         .await
-                        .unwrap();
+                        .unwrap_or(());
                 }
             },
             None => todo!(),
@@ -82,27 +134,25 @@ async fn received(
         VillageInlet::ExtendPopulationTime(time) => internal_sender
             .send(VillageInternal::ExtendPopulationTime(time))
             .await
-            .unwrap(),
+            .unwrap_or(()),
         VillageInlet::Die => internal_sender.send(VillageInternal::Die).await.unwrap(),
     };
 }
 
-pub async fn cleanup_steps(client: &Client, village_id: &String, tp: JoinHandle<()>) {
+pub async fn cleanup_steps(client: &Client, village_id: &String, tp: &JoinHandle<()>) {
     cleanup_persons(client, village_id).await.unwrap();
     cleanup_village_period(client, village_id).await.unwrap();
 
     tp.abort();
 }
 
-pub(super) async fn village_main(info: VillageInfo) -> () {
+pub(super) async fn village_main(info: VillageInfo, receiver: Receiver<VillageInlet>) -> () {
     println!(
         "Village {} ( {} ) thread started.",
         info.village_name, info.village_id
     );
 
     let (w_tx, mut w_tr) = mpsc::channel(1024);
-
-    let village_id = info.village_id.clone();
     let max_people = match (info.period_maker)(&RawPeriod::Populating) {
         Period::Populating {
             min_persons: _,
@@ -113,15 +163,9 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
     };
     let tp = Transporter::spawn(
         "Village/World to InnerVillage!".to_string(),
-        info.receiver,
+        receiver,
         received,
-        (
-            info.client.clone(),
-            village_id,
-            info.sender.clone(),
-            w_tx,
-            max_people,
-        ),
+        (info.clone(), w_tx, max_people),
     );
     println!("Transporter spawned!");
 
@@ -143,6 +187,8 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
             .await
             .unwrap();
 
+        let send_out = |outlet: VillageOutlet| async { info.sender.send(outlet).await.unwrap() };
+
         match _current_period {
             Period::None => break,
             Period::Populating {
@@ -151,102 +197,181 @@ pub(super) async fn village_main(info: VillageInfo) -> () {
                 max_dur,
             } => {
                 // Callback should only call if players are filled!
-                let mut base_dur = Duration::ZERO;
-                let mut first_loop = true;
-                loop {
-                    let active_dur = if first_loop {
-                        base_dur + max_dur
-                    } else {
-                        base_dur
-                    };
-
-                    info.sender
-                        .send(VillageOutlet::RawString(format!(
-                            "Population cycle starts with {:#?}.",
-                            active_dur
-                        )))
-                        .await
-                        .unwrap();
-
-                    let loop_start = Instant::now();
-                    match timeout(active_dur, w_tr.recv()).await {
-                        Ok(recv_result) => match recv_result {
+                match continuously_listen_to_safe_internals_within_timeout(
+                    &info,
+                    &mut w_tr,
+                    &tp,
+                    max_dur,
+                    |data| async {
+                        match data {
                             Some(from_callback) => match from_callback {
-                                VillageInternal::PersonsFilled => {
-                                    info.sender
-                                        .send(VillageOutlet::PeriodReady(
-                                            current_raw_period.cross().unwrap(),
-                                        ))
-                                        .await
-                                        .unwrap();
-                                    break;
-                                }
-                                VillageInternal::ExtendPopulationTime(time) => {
-                                    let remained = active_dur - loop_start.elapsed();
-                                    base_dur = remained + time;
-                                    first_loop = false;
-                                    continue;
-                                }
-                                VillageInternal::Die => {
-                                    // ❌ Village may gone ...
-                                    cleanup_steps(&info.client, &info.village_id, tp).await;
-                                    return;
-                                }
-                            },
-                            None => break,
-                        },
-                        // Timed out! ask the callback for gathered players
-                        Err(_) => {
-                            let current_joined =
-                                count_village_persons(&info.client, &info.village_id).await;
-
-                            if current_joined < min_persons.into() {
-                                info.sender
-                                    .send(VillageOutlet::PopulatingTimedOut)
-                                    .await
-                                    .unwrap();
-
-                                // ❌ Village may gone ...
-                                cleanup_steps(&info.client, &info.village_id, tp).await;
-                                return;
-                            } else {
-                                info.sender
-                                    .send(VillageOutlet::PeriodReady(
+                                SafeVillageInternal::PersonsFilled => {
+                                    send_out(VillageOutlet::PeriodReady(
                                         current_raw_period.cross().unwrap(),
                                     ))
-                                    .await
-                                    .unwrap();
-                                break;
-                            }
+                                    .await;
+                                    (Some(InternalResult::Break), Duration::ZERO)
+                                }
+                                SafeVillageInternal::ExtendPopulationTime(time) => (None, time),
+                            },
+                            None => (Some(InternalResult::Return), Duration::ZERO),
+                        }
+                    },
+                    |_, dur| async move {
+                        send_out(VillageOutlet::RawString(format!(
+                            "Population cycle starts with {:#?}.",
+                            dur
+                        )))
+                        .await;
+                    },
+                )
+                .await
+                {
+                    Some(res) => match res {
+                        InternalResult::Return => return,
+                        _ => (),
+                    },
+                    // Timed out!
+                    None => {
+                        let current_joined =
+                            count_village_persons(&info.client, &info.village_id).await;
+
+                        if current_joined < min_persons.into() {
+                            send_out(VillageOutlet::PopulatingTimedOut).await;
+
+                            // ❌ Village may gone ...
+                            cleanup_steps(&info.client, &info.village_id, &tp).await;
+                            return;
+                        } else {
+                            send_out(VillageOutlet::PeriodReady(
+                                current_raw_period.cross().unwrap(),
+                            ))
+                            .await;
+                            break;
                         }
                     }
                 }
             }
             Period::Assignments(_) => loop {
                 let roles = assign_roles(&info.client, &info.village_id).await.unwrap();
-                info.sender
-                    .send(VillageOutlet::RawString(format!(
-                        "Roles assigned: {:#?}.",
-                        roles
-                    )))
-                    .await
-                    .unwrap();
+                send_out(VillageOutlet::RawString(format!(
+                    "Roles assigned: {:#?}.",
+                    roles
+                )))
+                .await;
                 break;
             },
-            Period::DaytimeCycle(_) => loop {
-                match w_tr.recv().await {
-                    Some(data) => match data {
-                        VillageInternal::Die => {
-                            // ❌ Village may gone ...
-                            cleanup_steps(&info.client, &info.village_id, tp).await;
-                            return;
-                        }
-                        _ => continue,
-                    },
-                    None => todo!(),
+            Period::FirstNight(dur) => {
+                send_out(VillageOutlet::RawString(
+                    "Wolves may know each other now ...".to_string(),
+                ))
+                .await;
+                loop {
+                    match timeout(dur, listen_to_default_internals(&info, &mut w_tr, &tp)).await {
+                        Ok(res) => match res {
+                            InternalResult::Return => return,
+                            InternalResult::Continue => continue,
+                            InternalResult::Break => break,
+                        },
+                        Err(_) => break,
+                    }
                 }
-            },
+            }
+            Period::DaytimeCycle(get_len) => {
+                let mut current_daytime = Daytime::MidNight;
+                loop {
+                    current_daytime = current_daytime.cross();
+                    let daytime_len = get_len(current_daytime);
+                    send_out(VillageOutlet::DaytimeCycled(current_daytime, daytime_len)).await;
+
+                    let daytime_start = Instant::now();
+                    loop {
+                        match current_daytime {
+                            Daytime::SunRaise => match w_tr.recv().await {
+                                Some(internal) => todo!(),
+                                None => todo!(),
+                            },
+                            Daytime::MidNight => todo!(),
+                            Daytime::LynchTime => todo!(),
+                        }
+                    }
+                    // listen_to_default_internals(&info, &mut w_tr, &tp).await;
+                }
+            }
             Period::Ending => todo!(),
         }
+    }
+}
+
+/// If this returns None, the village_main should return.
+async fn listen_to_safe_internals(
+    info: &VillageInfo,
+    w_tr: &mut mpsc::Receiver<VillageInternal>,
+    tp: &JoinHandle<()>,
+) -> Option<SafeVillageInternal> {
+    match w_tr.recv().await {
+        Some(data) => match data {
+            // Let finish it right now ...
+            VillageInternal::Die => {
+                // ❌ No more sender? no more village ...
+                cleanup_steps(&info.client, &info.village_id, &tp).await;
+                None
+            }
+            _ => Some(data.into()),
+        },
+        None => {
+            // ❌ No more sender? no more village ...
+            cleanup_steps(&info.client, &info.village_id, &tp).await;
+            None
+        }
+    }
+}
+
+/// This will send a default answer to internals.
+async fn listen_to_default_internals(
+    info: &VillageInfo,
+    w_tr: &mut mpsc::Receiver<VillageInternal>,
+    tp: &JoinHandle<()>,
+) -> InternalResult {
+    match listen_to_safe_internals(info, w_tr, tp).await {
+        Some(data) => match data {
+            _ => InternalResult::Continue,
+        },
+        None => InternalResult::Return,
+    }
+}
+
+async fn continuously_listen_to_safe_internals_within_timeout<F, Fut, F2, F2ut>(
+    info: &VillageInfo,
+    w_tr: &mut mpsc::Receiver<VillageInternal>,
+    tp: &JoinHandle<()>,
+    duration: Duration,
+    handler: F,
+    pre_loop: F2,
+) -> Option<InternalResult>
+where
+    F: FnOnce(Option<SafeVillageInternal>) -> Fut + Copy,
+    F2: FnOnce(VillageInfo, Duration) -> F2ut + Copy,
+    Fut: Future<Output = (Option<InternalResult>, Duration)>,
+    F2ut: Future<Output = ()>,
+{
+    let mut base_dur = duration;
+    loop {
+        pre_loop(info.clone(), base_dur.clone()).await;
+        let loop_start = Instant::now();
+        match timeout(base_dur, listen_to_safe_internals(info, w_tr, tp)).await {
+            Ok(data) => {
+                let (should_exit, requested_dur_addon) = handler(data).await;
+                match should_exit {
+                    Some(exit) => return Some(exit),
+                    None => (),
+                };
+
+                let remaining = base_dur - loop_start.elapsed();
+                base_dur = remaining + requested_dur_addon;
+                continue;
+            }
+            Err(_) => return None,
+        };
     }
 }

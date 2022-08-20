@@ -196,6 +196,10 @@ impl World {
                                     village.get_village_name(),
                                     person_name
                                 );
+                                village
+                                    .extend_population_dur(Duration::from_secs(10))
+                                    .await
+                                    .unwrap();
                             }
                             _ => println!(
                                 "[🍨 World] Village {}, not populating, no person requested",
@@ -228,7 +232,17 @@ impl World {
                     WorldInlet::FillPersons { village_id, count } => {
                         let village = self.villages.get(&village_id).unwrap();
                         for i in 0..count {
-                            village.add_player(&format!("Player {}", i)).await.unwrap();
+                            match village.village.get_current_period() {
+                                Period::Populating {
+                                    min_persons: _,
+                                    max_persons: _,
+                                    max_dur: _,
+                                } => {
+                                    village.add_player(&format!("Player {}", i)).await.unwrap();
+                                    // tokio::time::sleep(Duration::from_secs(1)).await;
+                                }
+                                _ => break,
+                            }
                         }
                     }
                 },

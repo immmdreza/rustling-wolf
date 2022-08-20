@@ -16,7 +16,7 @@ async fn main() {
 
         // Sorry it looks like hell 🔥 :(
         match command {
-            "villages" => parts.pop_front().resolve_world_inlet(
+            "vg" => parts.pop_front().resolve_world_inlet(
                 |villages_command| match villages_command {
                     "new" => WorldInlet::NewVillage,
                     "list" => WorldInlet::ListVillages,
@@ -26,7 +26,7 @@ async fn main() {
                         },
                         "Missing village id.",
                     ),
-                    "persons" => parts.pop_front().resolve_world_inlet(
+                    "pr" => parts.pop_front().resolve_world_inlet(
                         |persons_command| match persons_command {
                             "add" => parts.pop_front().resolve_world_inlet(
                                 |village_id| {

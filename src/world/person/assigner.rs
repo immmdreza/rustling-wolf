@@ -1,3 +1,5 @@
+use rand::prelude::*;
+
 use super::roles::Role;
 
 pub fn roles(len: u64) -> Vec<Role> {
@@ -49,5 +51,7 @@ pub fn roles(len: u64) -> Vec<Role> {
         _ => panic!("Invalid number of players"),
     };
 
+    let mut rng = thread_rng();
+    arr.shuffle(&mut rng);
     arr
 }

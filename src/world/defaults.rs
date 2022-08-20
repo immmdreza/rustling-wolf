@@ -79,6 +79,14 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 simp_village.get_village_name(),
             );
         }
+        VillageOutlet::DaytimeCycled(daytime, duration) => {
+            println!(
+                "[🌴 {}]: A new daytime {} ( {:#?} ),",
+                simp_village.get_village_name(),
+                daytime,
+                duration
+            );
+        }
     }
 }
 
@@ -86,7 +94,7 @@ pub(crate) fn default_period_maker(raw: &RawPeriod) -> Period {
     match raw {
         RawPeriod::Populating => Period::Populating {
             min_persons: 5,
-            max_persons: 10,
+            max_persons: 7,
             max_dur: Duration::from_secs(300),
         },
         RawPeriod::Assignments => Period::Assignments(AssignmentMode::Normal),
@@ -97,5 +105,6 @@ pub(crate) fn default_period_maker(raw: &RawPeriod) -> Period {
         }),
         RawPeriod::Ending => Period::Ending,
         RawPeriod::None => Period::None,
+        RawPeriod::FirstNight => Period::FirstNight(Duration::from_secs(20)),
     }
 }

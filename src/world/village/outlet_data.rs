@@ -1,4 +1,6 @@
-use super::periods::{Period, RawPeriod};
+use std::time::Duration;
+
+use super::periods::{Daytime, Period, RawPeriod};
 
 #[derive(Debug)]
 pub enum AddPersonResult {
@@ -16,4 +18,5 @@ pub enum VillageOutlet {
     PeriodReady(RawPeriod),
     PeriodCrossed(RawPeriod, Period),
     PopulatingTimedOut,
+    DaytimeCycled(Daytime, Duration),
 }

@@ -18,4 +18,8 @@ impl Person {
             role_code,
         }
     }
+
+    pub fn get_id(&self) -> String {
+        self.person_id.to_string()
+    }
 }
