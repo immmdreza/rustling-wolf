@@ -1,8 +1,10 @@
+mod handle_from_world;
 pub mod inlet_data;
 pub mod outlet_data;
 pub mod periods;
 pub mod simplified_village;
 pub mod transports;
+mod village_info;
 mod village_main;
 
 use std::future::Future;
@@ -16,19 +18,11 @@ use self::{
     periods::{Period, RawPeriod},
     simplified_village::SimplifiedVillage,
     transports::Transporter,
-    village_main::village_main,
+    village_info::VillageInfo,
+    village_main::VillageMain,
 };
 
 use super::WorldInlet;
-
-#[derive(Clone)]
-pub(super) struct VillageInfo {
-    pub(super) client: Client,
-    village_id: String,
-    village_name: String,
-    sender: Sender<VillageOutlet>,
-    period_maker: fn(&RawPeriod) -> Period,
-}
 
 #[derive(Clone)]
 pub struct Village {
@@ -82,8 +76,10 @@ impl Village {
             sender: outlet_tx,
             period_maker,
         };
+
         tokio::spawn(async move {
-            village_main(info, inlet_rx).await;
+            let mut vm = VillageMain::new(info, inlet_rx);
+            vm.run().await
         });
 
         village
