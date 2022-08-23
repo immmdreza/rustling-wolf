@@ -267,24 +267,13 @@ impl VillageMain {
                             .await
                             .unwrap();
 
-                        loop {
-                            match current_daytime {
-                                Daytime::SunRaise => {
-                                    self.notify(VillageOutlet::RawString(
-                                        "Villager may discuss now ...".to_string(),
-                                    ))
-                                    .await
-                                    .unwrap();
-
-                                    if self.get_streamer(daytime_len).timeout_or_die().await {
-                                        return;
-                                    }
-                                }
-                                Daytime::MidNight => todo!(),
-                                Daytime::LynchTime => todo!(),
-                            }
+                        if self.get_streamer(daytime_len).timeout_or_die().await {
+                            return;
                         }
-                        // listen_to_default_internals(&info, &mut w_tr, &tp).await;
+
+                        // match current_daytime {
+
+                        // }
                     }
                 }
                 Period::Ending => todo!(),

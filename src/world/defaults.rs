@@ -95,7 +95,7 @@ pub(crate) fn default_period_maker(raw: &RawPeriod) -> Period {
         RawPeriod::Populating => Period::Populating {
             min_persons: 5,
             max_persons: 7,
-            max_dur: Duration::from_secs(300),
+            max_dur: Duration::from_secs(30),
         },
         RawPeriod::Assignments => Period::Assignments(AssignmentMode::Normal),
         RawPeriod::DaytimeCycle => Period::DaytimeCycle(|dt| match dt {

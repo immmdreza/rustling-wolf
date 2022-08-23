@@ -14,7 +14,6 @@ async fn main() {
         let mut parts = VecDeque::from_iter(s.split(' ').into_iter());
         let command = parts.pop_front().unwrap();
 
-        // Sorry it looks like hell 🔥 :(
         match command {
             "vg" => parts.pop_front().resolve_world_inlet(
                 |villages_command| match villages_command {
