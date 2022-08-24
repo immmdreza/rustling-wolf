@@ -7,14 +7,10 @@ use crate::{
         person::{add_person_to_village, count_village_persons, person_name_exists},
         village::get_village_period,
     },
-    world::village::periods::RawPeriod,
+    world::{village::periods::RawPeriod, world_inlet::FromVillage, AddPersonResult, WorldInlet},
 };
 
-use super::{
-    inlet_data::VillageInlet,
-    outlet_data::{AddPersonResult, VillageOutlet},
-    village_info::VillageInfo,
-};
+use super::{inlet_data::VillageInlet, village_info::VillageInfo};
 
 #[derive(Debug)]
 pub(super) enum VillageInternal {
@@ -69,34 +65,36 @@ pub(super) async fn received_from_world(
         max_persons,
     ): (VillageInfo, mpsc::Sender<VillageInternal>, u8),
 ) {
+    use FromVillage::*;
+
+    let send_to_world = |data: FromVillage| async {
+        sender
+            .send(WorldInlet::from_village(&village_id, data))
+            .await
+    };
+
     match received {
-        VillageInlet::RawString(s) => {
-            println!("[🌏]: {}", s);
-            sender.send(VillageOutlet::RawString(s)).await.unwrap_or(());
-        }
         VillageInlet::AddPerson(name) => match get_village_period(&client, &village_id).await {
             Some(period) => match period {
                 RawPeriod::Populating => {
                     let current_person_count = count_village_persons(&client, &village_id).await;
                     if current_person_count < max_persons.into() {
                         if person_name_exists(&client, &village_id, &name).await {
-                            sender
-                                .send(VillageOutlet::AddPerson(AddPersonResult::Failed(
-                                    "The person name is duplicated".to_string(),
-                                )))
-                                .await
-                                .unwrap_or(());
+                            send_to_world(AddPerson(AddPersonResult::Failed(
+                                "The person name is duplicated".to_string(),
+                            )))
+                            .await
+                            .unwrap_or(())
                         } else {
                             if let Some(pr) =
                                 add_person_to_village(&client, &village_id, name.as_str()).await
                             {
-                                sender
-                                    .send(VillageOutlet::AddPerson(AddPersonResult::Added {
-                                        person_id: pr.get_id(),
-                                        current_count: current_person_count + 1,
-                                    }))
-                                    .await
-                                    .unwrap_or(());
+                                send_to_world(AddPerson(AddPersonResult::Added {
+                                    person_id: pr.get_id(),
+                                    current_count: current_person_count + 1,
+                                }))
+                                .await
+                                .unwrap_or(());
 
                                 if current_person_count + 1 >= max_persons.into() {
                                     internal_sender
@@ -105,12 +103,11 @@ pub(super) async fn received_from_world(
                                         .unwrap_or(());
                                 }
                             } else {
-                                sender
-                                    .send(VillageOutlet::AddPerson(AddPersonResult::Failed(
-                                        "Error while inserting person.".to_string(),
-                                    )))
-                                    .await
-                                    .unwrap_or(());
+                                send_to_world(AddPerson(AddPersonResult::Failed(
+                                    "Error while inserting person.".to_string(),
+                                )))
+                                .await
+                                .unwrap_or(());
                             }
                         }
                     } else {
@@ -120,21 +117,19 @@ pub(super) async fn received_from_world(
                             .unwrap_or(());
                     }
                 }
-                _ => {
-                    sender
-                        .send(VillageOutlet::AddPerson(AddPersonResult::Failed(
-                            "Not populating!".to_string(),
-                        )))
-                        .await
-                        .unwrap_or(());
-                }
+                _ => send_to_world(AddPerson(AddPersonResult::Failed(
+                    "Not populating!".to_string(),
+                )))
+                .await
+                .unwrap_or(()),
             },
-            None => todo!(),
+            None => (),
         },
         VillageInlet::ExtendPopulationTime(time) => internal_sender
             .send(VillageInternal::ExtendPopulationTime(time))
             .await
             .unwrap_or(()),
         VillageInlet::Die => internal_sender.send(VillageInternal::Die).await.unwrap(),
+        VillageInlet::RawString(s) => send_to_world(RawString(s)).await.unwrap_or(()),
     };
 }

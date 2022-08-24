@@ -3,24 +3,30 @@ use std::collections::VecDeque;
 use rustling_wolf::{
     console::setup_console_receiver,
     console_answer,
-    world::{QuickResolver, World, WorldInlet},
+    quick_resolver::QuickResolver,
+    world::{
+        world_inlet::{FromHeaven, WorldInlet},
+        World,
+    },
 };
 
 #[tokio::main]
 async fn main() {
+    use FromHeaven::*;
+
     let mut world = World::new().await;
 
     let rx = setup_console_receiver(|s| {
         let mut parts = VecDeque::from_iter(s.split(' ').into_iter());
         let command = parts.pop_front().unwrap();
 
-        match command {
+        WorldInlet::FromHeaven(match command {
             "vg" => parts.pop_front().resolve_world_inlet(
                 |villages_command| match villages_command {
-                    "new" => WorldInlet::NewVillage,
-                    "list" => WorldInlet::ListVillages,
+                    "new" => NewVillage,
+                    "list" => ListVillages,
                     "kill" => parts.pop_front().resolve_world_inlet(
-                        |res| WorldInlet::KillVillage {
+                        |res| KillVillage {
                             village_id: res.to_string(),
                         },
                         "Missing village id.",
@@ -30,7 +36,7 @@ async fn main() {
                             "add" => parts.pop_front().resolve_world_inlet(
                                 |village_id| {
                                     parts.pop_front().resolve_world_inlet(
-                                        |person_name| WorldInlet::RequestPerson {
+                                        |person_name| RequestPerson {
                                             village_id: village_id.to_string(),
                                             person_name: person_name.to_string(),
                                         },
@@ -44,7 +50,7 @@ async fn main() {
                                     parts.pop_front().resolve_world_inlet(
                                         |count| {
                                             count.parse::<u8>().resolve_world_inlet(
-                                                |count| WorldInlet::FillPersons {
+                                                |count| FillPersons {
                                                     village_id: village_id.to_string(),
                                                     count,
                                                 },
@@ -56,22 +62,22 @@ async fn main() {
                                 },
                                 "Missing village id.",
                             ),
-                            _ => WorldInlet::None,
+                            _ => Nothing,
                         },
                         "Missing persons command! (add, fill)",
                     ),
                     _ => {
                         console_answer!("Unknown village command! (new, list, kill, persons).");
-                        WorldInlet::None
+                        Nothing
                     }
                 },
                 "Unknown command! (villages).",
             ),
             _ => {
                 console_answer!("Unknown village command! (new, list, kill, persons).");
-                WorldInlet::None
+                Nothing
             }
-        }
+        })
     });
 
     console_answer!("The world has been initialized, you can command now ...");

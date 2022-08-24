@@ -13,10 +13,14 @@ use crate::{
         person::{assign_roles, cleanup_persons, count_village_persons},
         village::{cleanup_village_period, set_or_update_village_period},
     },
-    world::village::{
-        handle_from_world::received_from_world,
-        periods::{Daytime, Period, RawPeriod},
-        village_main::internal_streamer::ExitFlag,
+    world::{
+        village::{
+            handle_from_world::received_from_world,
+            periods::{Daytime, Period, RawPeriod},
+            village_main::internal_streamer::ExitFlag,
+        },
+        world_inlet::FromVillage,
+        WorldInlet,
     },
 };
 
@@ -25,7 +29,6 @@ use self::internal_streamer::InternalStreamer;
 use super::{
     handle_from_world::{SafeVillageInternal, VillageInternal},
     inlet_data::VillageInlet,
-    outlet_data::VillageOutlet,
     transports::Transporter,
     village_info::VillageInfo,
 };
@@ -82,7 +85,7 @@ impl VillageMain {
         &self.info.village_name
     }
 
-    fn get_out_sender(&self) -> &mpsc::Sender<VillageOutlet> {
+    fn get_out_sender(&self) -> &mpsc::Sender<WorldInlet> {
         &self.info.sender
     }
 
@@ -107,24 +110,20 @@ impl VillageMain {
         }
     }
 
-    async fn notify(
-        &self,
-        outlet: VillageOutlet,
-    ) -> Result<(), mpsc::error::SendError<VillageOutlet>> {
-        self.get_out_sender().send(outlet).await
+    async fn notify(&self, outlet: FromVillage) -> Result<(), mpsc::error::SendError<WorldInlet>> {
+        self.get_out_sender()
+            .send(WorldInlet::from_village(self.get_village_id(), outlet))
+            .await
     }
 
     #[allow(dead_code)]
-    async fn safe_notify(&self, outlet: VillageOutlet) {
+    async fn safe_notify(&self, outlet: FromVillage) {
         self.notify(outlet).await.unwrap()
     }
 
-    async fn notify_period_cross(&self) -> Result<(), mpsc::error::SendError<VillageOutlet>> {
-        self.notify(VillageOutlet::PeriodCrossed(
-            self.current_period_raw,
-            self.get_current_period(),
-        ))
-        .await
+    async fn notify_period_cross(&self) -> Result<(), mpsc::error::SendError<WorldInlet>> {
+        self.notify(FromVillage::NewPeriod(self.get_current_period()))
+            .await
     }
 
     async fn cleanup_steps(&self) {
@@ -174,7 +173,7 @@ impl VillageMain {
         &mut self,
         timeout: Duration,
     ) -> Result<String, ExitFlag> {
-        self.notify(VillageOutlet::WolvesTurn).await.unwrap();
+        self.notify(FromVillage::WolvesTurn).await.unwrap();
         self.get_streamer(timeout).wait_for_wolves_choice().await
     }
 
@@ -182,17 +181,17 @@ impl VillageMain {
         &mut self,
         timeout: Duration,
     ) -> Result<String, ExitFlag> {
-        self.notify(VillageOutlet::DoctorTurn).await.unwrap();
+        self.notify(FromVillage::DoctorTurn).await.unwrap();
         self.get_streamer(timeout).wait_for_doctor_choice().await
     }
 
     async fn notify_seer_and_get_choice(&mut self, timeout: Duration) -> Result<String, ExitFlag> {
-        self.notify(VillageOutlet::SeerTurn).await.unwrap();
+        self.notify(FromVillage::SeerTurn).await.unwrap();
         self.get_streamer(timeout).wait_for_seer_choice().await
     }
 
     pub(super) async fn run(&mut self) {
-        use VillageOutlet::*;
+        use FromVillage::*;
 
         println!(
             "Village {} ( {} ) thread started.",
