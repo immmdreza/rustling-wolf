@@ -19,4 +19,8 @@ pub enum VillageOutlet {
     PeriodCrossed(RawPeriod, Period),
     PopulatingTimedOut,
     DaytimeCycled(Daytime, Duration),
+
+    WolvesTurn,
+    DoctorTurn,
+    SeerTurn,
 }

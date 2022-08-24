@@ -87,6 +87,9 @@ pub(crate) async fn received_from_village(data: VillageOutlet, simp_village: Sim
                 duration
             );
         }
+        VillageOutlet::WolvesTurn => todo!(),
+        VillageOutlet::DoctorTurn => todo!(),
+        VillageOutlet::SeerTurn => todo!(),
     }
 }
 

@@ -21,6 +21,10 @@ pub(super) enum VillageInternal {
     PersonsFilled,
     ExtendPopulationTime(Duration),
     Die,
+
+    WolvesVictimSelected(String),
+    DoctorTargetSelected(String),
+    SeerTargetSelected(String),
 }
 
 impl From<VillageInternal> for SafeVillageInternal {
@@ -31,6 +35,13 @@ impl From<VillageInternal> for SafeVillageInternal {
                 SafeVillageInternal::ExtendPopulationTime(e)
             }
             VillageInternal::Die => panic!("SafeVillageInternal is suppose to filter this."),
+            VillageInternal::WolvesVictimSelected(s) => {
+                SafeVillageInternal::WolvesVictimSelected(s)
+            }
+            VillageInternal::DoctorTargetSelected(s) => {
+                SafeVillageInternal::DoctorTargetSelected(s)
+            }
+            VillageInternal::SeerTargetSelected(s) => SafeVillageInternal::SeerTargetSelected(s),
         }
     }
 }
@@ -38,6 +49,10 @@ impl From<VillageInternal> for SafeVillageInternal {
 pub(super) enum SafeVillageInternal {
     PersonsFilled,
     ExtendPopulationTime(Duration),
+
+    WolvesVictimSelected(String),
+    DoctorTargetSelected(String),
+    SeerTargetSelected(String),
 }
 
 pub(super) async fn received_from_world(

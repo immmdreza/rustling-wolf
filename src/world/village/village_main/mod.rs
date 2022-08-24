@@ -170,7 +170,30 @@ impl VillageMain {
         InternalStreamer::new(self, timeout)
     }
 
+    async fn notify_wolves_and_get_choice(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<String, ExitFlag> {
+        self.notify(VillageOutlet::WolvesTurn).await.unwrap();
+        self.get_streamer(timeout).wait_for_wolves_choice().await
+    }
+
+    async fn notify_doctor_and_get_choice(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<String, ExitFlag> {
+        self.notify(VillageOutlet::DoctorTurn).await.unwrap();
+        self.get_streamer(timeout).wait_for_doctor_choice().await
+    }
+
+    async fn notify_seer_and_get_choice(&mut self, timeout: Duration) -> Result<String, ExitFlag> {
+        self.notify(VillageOutlet::SeerTurn).await.unwrap();
+        self.get_streamer(timeout).wait_for_seer_choice().await
+    }
+
     pub(super) async fn run(&mut self) {
+        use VillageOutlet::*;
+
         println!(
             "Village {} ( {} ) thread started.",
             self.get_village_name(),
@@ -196,17 +219,16 @@ impl VillageMain {
                         match data {
                             SafeVillageInternal::PersonsFilled => {
                                 let vg = streamer.vg();
-                                vg.notify(VillageOutlet::PeriodReady(
-                                    vg.current_period_raw.cross().unwrap(),
-                                ))
-                                .await
-                                .unwrap();
+                                vg.notify(PeriodReady(vg.current_period_raw.cross().unwrap()))
+                                    .await
+                                    .unwrap();
                                 break;
                             }
                             SafeVillageInternal::ExtendPopulationTime(time) => {
                                 streamer.increase_timeout(time);
                                 continue;
                             }
+                            _ => continue,
                         };
                     }
 
@@ -216,19 +238,15 @@ impl VillageMain {
                             let current_joined = self.read_persons_count().await;
 
                             if current_joined < min_persons.into() {
-                                self.notify(VillageOutlet::PopulatingTimedOut)
-                                    .await
-                                    .unwrap();
+                                self.notify(PopulatingTimedOut).await.unwrap();
 
                                 // ❌ Village may gone ...
                                 self.cleanup_steps().await;
                                 return;
                             } else {
-                                self.notify(VillageOutlet::PeriodReady(
-                                    self.current_period_raw.cross().unwrap(),
-                                ))
-                                .await
-                                .unwrap();
+                                self.notify(PeriodReady(self.current_period_raw.cross().unwrap()))
+                                    .await
+                                    .unwrap();
                                 break;
                             }
                         }
@@ -239,20 +257,15 @@ impl VillageMain {
                 }
                 Period::Assignments(_) => loop {
                     let roles = self.assign_roles().await;
-                    self.notify(VillageOutlet::RawString(format!(
-                        "Roles assigned: {:#?}.",
-                        roles
-                    )))
-                    .await
-                    .unwrap();
+                    self.notify(RawString(format!("Roles assigned: {:#?}.", roles)))
+                        .await
+                        .unwrap();
                     break;
                 },
                 Period::FirstNight(dur) => {
-                    self.notify(VillageOutlet::RawString(
-                        "Wolves may know each other now ...".to_string(),
-                    ))
-                    .await
-                    .unwrap();
+                    self.notify(RawString("Wolves may know each other now ...".to_string()))
+                        .await
+                        .unwrap();
 
                     if self.get_streamer(dur).timeout_or_die().await {
                         return;
@@ -262,18 +275,56 @@ impl VillageMain {
                     let mut current_daytime = Daytime::MidNight;
                     loop {
                         current_daytime = current_daytime.cross();
-                        let daytime_len = get_len(current_daytime);
-                        self.notify(VillageOutlet::DaytimeCycled(current_daytime, daytime_len))
+                        let timeout = get_len(current_daytime);
+                        self.notify(DaytimeCycled(current_daytime, timeout))
                             .await
                             .unwrap();
 
-                        if self.get_streamer(daytime_len).timeout_or_die().await {
-                            return;
+                        match current_daytime {
+                            Daytime::MidNight => {
+                                // Ask for roles to execute night action ...
+                                // 1. Wolves may decide to eat. 30s
+                                if let Ok(wolves_target) =
+                                    self.notify_wolves_and_get_choice(timeout).await
+                                {
+                                    // Do something with target id ...
+                                }
+                                // Village dead ☠️
+                                else {
+                                    return;
+                                }
+                                // 2. Doctor may save. 20s
+                                if let Ok(doctor_target) =
+                                    self.notify_doctor_and_get_choice(timeout).await
+                                {
+                                    // Do something with target id ...
+                                }
+                                // Village dead ☠️
+                                else {
+                                    return;
+                                }
+
+                                // 3. Detective or Seer may scan roles. 20s
+                                if let Ok(seer_target) =
+                                    self.notify_seer_and_get_choice(timeout).await
+                                {
+                                    // Do something with target id ...
+                                }
+                                // Village dead ☠️
+                                else {
+                                    return;
+                                }
+                            }
+                            Daytime::SunRaise => {
+                                // Check game status ...
+                                if self.get_streamer(timeout).timeout_or_die().await {
+                                    return;
+                                }
+                            }
+                            Daytime::LynchTime => {
+                                // Request alive players to vote ...
+                            }
                         }
-
-                        // match current_daytime {
-
-                        // }
                     }
                 }
                 Period::Ending => todo!(),

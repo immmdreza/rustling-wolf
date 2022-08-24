@@ -6,6 +6,7 @@ use crate::world::village::handle_from_world::SafeVillageInternal;
 
 use super::VillageMain;
 
+#[derive(Debug, Clone, Copy)]
 pub(super) enum ExitFlag {
     NotExited,
     TimedOut,
@@ -61,6 +62,39 @@ impl<'r> InternalStreamer<'r> {
             ExitFlag::VillageDead => true,
             _ => false,
         }
+    }
+
+    pub(super) async fn wait_for_wolves_choice(&mut self) -> Result<String, ExitFlag> {
+        while let Ok(thing) = self.next().await {
+            match thing {
+                SafeVillageInternal::WolvesVictimSelected(target) => return Ok(target),
+                _ => continue,
+            }
+        }
+
+        Err(self.exit_err)
+    }
+
+    pub(super) async fn wait_for_doctor_choice(&mut self) -> Result<String, ExitFlag> {
+        while let Ok(thing) = self.next().await {
+            match thing {
+                SafeVillageInternal::DoctorTargetSelected(target) => return Ok(target),
+                _ => continue,
+            }
+        }
+
+        Err(self.exit_err)
+    }
+
+    pub(super) async fn wait_for_seer_choice(&mut self) -> Result<String, ExitFlag> {
+        while let Ok(thing) = self.next().await {
+            match thing {
+                SafeVillageInternal::SeerTargetSelected(target) => return Ok(target),
+                _ => continue,
+            }
+        }
+
+        Err(self.exit_err)
     }
 
     pub(super) fn increase_timeout(&mut self, dur: Duration) {
