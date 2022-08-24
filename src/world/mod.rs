@@ -1,80 +1,24 @@
 mod defaults;
 pub mod person;
 pub mod village;
+pub mod world_inlet;
 
-use std::{collections::HashMap, future::Future, thread, time::Duration};
+use std::{collections::HashMap, thread, time::Duration};
 
 use mongodb::{options::ClientOptions, Client};
 use rand::prelude::*;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::console_answer;
+use crate::mongo_fns::world::person::count_village_persons;
 
-use self::village::{
-    outlet_data::VillageOutlet,
-    periods::{Period, RawPeriod},
-    simplified_village::SimplifiedVillage,
-    Village,
+use self::{
+    village::{
+        periods::{Period, RawPeriod},
+        simplified_village::SimplifiedVillage,
+        Village,
+    },
+    world_inlet::{AddPersonResult, FromHeaven, FromVillage, WorldInlet},
 };
-
-#[derive(Debug)]
-pub enum WorldInlet {
-    None,
-    VillageDisposed(String),
-    NewPeriod {
-        village_id: String,
-        period: Period,
-    },
-    RequestPerson {
-        village_id: String,
-        person_name: String,
-    },
-    FillPersons {
-        village_id: String,
-        count: u8,
-    },
-    KillVillage {
-        village_id: String,
-    },
-    ListVillages,
-    NewVillage,
-}
-
-pub trait QuickResolver<T, F> {
-    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
-    where
-        F: FnOnce(T) -> WorldInlet;
-}
-
-impl<T, F> QuickResolver<T, F> for Option<T> {
-    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
-    where
-        F: FnOnce(T) -> WorldInlet,
-    {
-        match self {
-            Some(target) => on_some(target),
-            None => {
-                console_answer!("{}", msg);
-                WorldInlet::None
-            }
-        }
-    }
-}
-
-impl<T, F, U> QuickResolver<T, F> for Result<T, U> {
-    fn resolve_world_inlet(self, on_some: F, msg: &str) -> WorldInlet
-    where
-        F: FnOnce(T) -> WorldInlet,
-    {
-        match self {
-            Ok(target) => on_some(target),
-            Err(_) => {
-                console_answer!("{}", msg);
-                WorldInlet::None
-            }
-        }
-    }
-}
 
 pub struct World {
     client: Client,
@@ -117,16 +61,11 @@ impl World {
         }
     }
 
-    pub fn create_village<G, Gut>(
+    pub fn create_village(
         &mut self,
         village_name: Option<&str>,
-        callback: Option<G>,
         period_maker: fn(&RawPeriod) -> Period,
-    ) -> &SimplifiedVillage
-    where
-        G: Fn(VillageOutlet, SimplifiedVillage) -> Gut + Sync + Send + Copy + 'static,
-        Gut: Future<Output = ()> + Sync + Send + 'static,
-    {
+    ) -> &SimplifiedVillage {
         let mut rng = thread_rng();
         let sv = Village::new(
             self.client.clone(),
@@ -134,7 +73,6 @@ impl World {
                 Some(name) => name,
                 None => self.sample_village_names.choose(&mut rng).unwrap(),
             },
-            callback,
             period_maker,
             self.to_world_sender.clone(),
         )
@@ -150,11 +88,170 @@ impl World {
         village_name: Option<&str>,
         period_maker: fn(&RawPeriod) -> Period,
     ) -> &SimplifiedVillage {
-        self.create_village(
-            village_name,
-            Some(defaults::received_from_village),
-            period_maker,
-        )
+        self.create_village(village_name, period_maker)
+    }
+
+    fn kill_village(&mut self, village_id: &str) {
+        self.villages.remove(village_id);
+    }
+
+    fn get_village(&self, village_id: &str) -> &SimplifiedVillage {
+        self.villages.get(village_id).unwrap()
+    }
+
+    fn get_mut_village(&mut self, village_id: &str) -> &mut SimplifiedVillage {
+        self.villages.get_mut(village_id).unwrap()
+    }
+
+    async fn handle_from_heaven(&mut self, from_heaven: FromHeaven) {
+        use FromHeaven::*;
+
+        match from_heaven {
+            RawString(s) => println!("[🦀 World]: {}", s),
+            RequestPerson {
+                village_id,
+                person_name,
+            } => {
+                let village = self.villages.get(&village_id).unwrap();
+                match village.village.get_current_period() {
+                    Period::Populating {
+                        min_persons: _,
+                        max_persons: _,
+                        max_dur: _,
+                    } => {
+                        village.add_player(&person_name).await.unwrap();
+                        println!(
+                            "[🍨 World] Sent player request to {}, with name {}.",
+                            village.get_village_name(),
+                            person_name
+                        );
+                        village
+                            .extend_population_dur(Duration::from_secs(10))
+                            .await
+                            .unwrap();
+                    }
+                    _ => println!(
+                        "[🍨 World] Village {}, not populating, no person requested",
+                        village.get_village_name(),
+                    ),
+                }
+            }
+            FillPersons { village_id, count } => {
+                let village = self.villages.get(&village_id).unwrap();
+                for i in 0..count {
+                    match village.village.get_current_period() {
+                        Period::Populating {
+                            min_persons: _,
+                            max_persons: _,
+                            max_dur: _,
+                        } => {
+                            village.add_player(&format!("Player {}", i)).await.unwrap();
+                            // tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            KillVillage { village_id } => {
+                let village = self.villages.get(&village_id).unwrap();
+                village.die().await.unwrap();
+                println!(
+                    "[🍨 World] Sent die order to {}.",
+                    village.get_village_name()
+                );
+            }
+            ListVillages => {
+                println!("[🍨 World] Listing villages:");
+                for village in self.villages.values() {
+                    println!(
+                        "- 🌴 {} ( {} )",
+                        village.get_village_name(),
+                        village.get_village_id()
+                    );
+                }
+            }
+            NewVillage => {
+                self.create_village_default_receiver(None, defaults::default_period_maker);
+            }
+            Nothing => (),
+        }
+    }
+
+    async fn handle_from_village(&mut self, village_id: String, from_village: FromVillage) {
+        use FromVillage::*;
+
+        match from_village {
+            RawString(text) => {
+                println!("[🌴 {}]: {}", village_id, text);
+            }
+            VillageDisposed => {
+                self.kill_village(&village_id);
+                println!("[🍨 World] Village {} disposed", village_id);
+            }
+            PeriodReady(period) => {
+                let village = self.get_village(&village_id);
+                println!(
+                    "[🌴 {}]: Village is ready to merge to the next period: {:?}",
+                    village.get_village_name(),
+                    period
+                );
+                match period {
+                    RawPeriod::Assignments => {
+                        let joined_persons = count_village_persons(&self.client, &village_id).await;
+                        println!(
+                            "[🌴 {}]: Village populated with {} persons",
+                            village.get_village_name(),
+                            joined_persons
+                        );
+                    }
+                    _ => (),
+                }
+            }
+            NewPeriod(period) => {
+                let village = self.get_mut_village(&village_id);
+                village.village.set_current_period(period);
+                println!(
+                    "[🍨 World] Village {}, entered new period: {:?}",
+                    village.get_village_name(),
+                    period
+                );
+            }
+            PopulatingTimedOut => {
+                self.kill_village(&village_id);
+                println!("[🍨 World] Village {} disposed", village_id);
+            }
+            DaytimeCycled(daytime, dur) => {
+                let village = self.get_village(&village_id);
+                println!(
+                    "[🌴 {}]: A new daytime {} ( {:#?} ),",
+                    village.get_village_name(),
+                    daytime,
+                    dur
+                );
+            }
+            AddPerson(result) => {
+                let village = self.get_village(&village_id);
+                match result {
+                    AddPersonResult::Added {
+                        person_id,
+                        current_count,
+                    } => println!(
+                        "[🌴 {}]: Created person with id {} ({} persons in village).",
+                        village.get_village_name(),
+                        person_id,
+                        current_count
+                    ),
+                    AddPersonResult::Failed(err) => println!(
+                        "[🌴 {}]: Failed creating person: {}.",
+                        village.get_village_name(),
+                        err
+                    ),
+                }
+            }
+            WolvesTurn => todo!(),
+            DoctorTurn => todo!(),
+            SeerTurn => todo!(),
+        }
     }
 
     pub async fn idle(&mut self, mut rx: Receiver<WorldInlet>) -> () {
@@ -166,84 +263,9 @@ impl World {
 
             match received {
                 Some(received) => match received {
-                    WorldInlet::VillageDisposed(village_id) => {
-                        self.villages.remove(&village_id);
-                        println!("[🍨 World] Village {} disposed", village_id);
-                    }
-                    WorldInlet::NewPeriod { village_id, period } => {
-                        let village = self.villages.get_mut(&village_id).unwrap();
-                        village.village.set_current_period(period);
-                        println!(
-                            "[🍨 World] Village {}, entered new period: {:?}",
-                            village.get_village_name(),
-                            period
-                        );
-                    }
-                    WorldInlet::RequestPerson {
-                        village_id,
-                        person_name,
-                    } => {
-                        let village = self.villages.get(&village_id).unwrap();
-                        match village.village.get_current_period() {
-                            Period::Populating {
-                                min_persons: _,
-                                max_persons: _,
-                                max_dur: _,
-                            } => {
-                                village.add_player(&person_name).await.unwrap();
-                                println!(
-                                    "[🍨 World] Sent player request to {}, with name {}.",
-                                    village.get_village_name(),
-                                    person_name
-                                );
-                                village
-                                    .extend_population_dur(Duration::from_secs(10))
-                                    .await
-                                    .unwrap();
-                            }
-                            _ => println!(
-                                "[🍨 World] Village {}, not populating, no person requested",
-                                village.get_village_name(),
-                            ),
-                        }
-                    }
-                    WorldInlet::None => (),
-                    WorldInlet::KillVillage { village_id } => {
-                        let village = self.villages.get(&village_id).unwrap();
-                        village.die().await.unwrap();
-                        println!(
-                            "[🍨 World] Sent die order to {}.",
-                            village.get_village_name()
-                        );
-                    }
-                    WorldInlet::ListVillages => {
-                        println!("[🍨 World] Listing villages:");
-                        for village in self.villages.values() {
-                            println!(
-                                "- 🌴 {} ( {} )",
-                                village.get_village_name(),
-                                village.get_village_id()
-                            );
-                        }
-                    }
-                    WorldInlet::NewVillage => {
-                        self.create_village_default_receiver(None, defaults::default_period_maker);
-                    }
-                    WorldInlet::FillPersons { village_id, count } => {
-                        let village = self.villages.get(&village_id).unwrap();
-                        for i in 0..count {
-                            match village.village.get_current_period() {
-                                Period::Populating {
-                                    min_persons: _,
-                                    max_persons: _,
-                                    max_dur: _,
-                                } => {
-                                    village.add_player(&format!("Player {}", i)).await.unwrap();
-                                    // tokio::time::sleep(Duration::from_secs(1)).await;
-                                }
-                                _ => break,
-                            }
-                        }
+                    WorldInlet::FromHeaven(data) => self.handle_from_heaven(data).await,
+                    WorldInlet::FromVillage { village_id, data } => {
+                        self.handle_from_village(village_id, data).await
                     }
                 },
                 None => (),
