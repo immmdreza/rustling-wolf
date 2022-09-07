@@ -1,7 +1,4 @@
-use crate::{
-    console_answer,
-    world::world_inlet::{FromHeaven},
-};
+use crate::{console_answer, world::world_inlet::FromHeaven};
 
 pub trait QuickResolver<T, F> {
     fn resolve_world_inlet(self, on_some: F, msg: &str) -> FromHeaven

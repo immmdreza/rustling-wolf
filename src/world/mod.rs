@@ -9,7 +9,9 @@ use mongodb::{options::ClientOptions, Client};
 use rand::prelude::*;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::mongo_fns::world::person::count_village_persons;
+use crate::mongo_fns::world::person::{
+    count_village_persons, get_all_alive_persons, get_eatable_alive_persons,
+};
 
 use self::{
     village::{
@@ -179,6 +181,8 @@ impl World {
 
     async fn handle_from_village(&mut self, village_id: String, from_village: FromVillage) {
         use FromVillage::*;
+        let village = self.get_village(&village_id);
+        let village_name = village.get_village_name();
 
         match from_village {
             RawString(text) => {
@@ -189,7 +193,6 @@ impl World {
                 println!("[🍨 World] Village {} disposed", village_id);
             }
             PeriodReady(period) => {
-                let village = self.get_village(&village_id);
                 println!(
                     "[🌴 {}]: Village is ready to merge to the next period: {:?}",
                     village.get_village_name(),
@@ -221,7 +224,6 @@ impl World {
                 println!("[🍨 World] Village {} disposed", village_id);
             }
             DaytimeCycled(daytime, dur) => {
-                let village = self.get_village(&village_id);
                 println!(
                     "[🌴 {}]: A new daytime {} ( {:#?} ),",
                     village.get_village_name(),
@@ -229,28 +231,91 @@ impl World {
                     dur
                 );
             }
-            AddPerson(result) => {
-                let village = self.get_village(&village_id);
-                match result {
-                    AddPersonResult::Added {
-                        person_id,
-                        current_count,
-                    } => println!(
-                        "[🌴 {}]: Created person with id {} ({} persons in village).",
-                        village.get_village_name(),
-                        person_id,
-                        current_count
-                    ),
-                    AddPersonResult::Failed(err) => println!(
-                        "[🌴 {}]: Failed creating person: {}.",
-                        village.get_village_name(),
-                        err
-                    ),
+            AddPerson(result) => match result {
+                AddPersonResult::Added {
+                    person_id,
+                    current_count,
+                } => println!(
+                    "[🌴 {}]: Created person with id {} ({} persons in village).",
+                    village.get_village_name(),
+                    person_id,
+                    current_count
+                ),
+                AddPersonResult::Failed(err) => println!(
+                    "[🌴 {}]: Failed creating person: {}.",
+                    village.get_village_name(),
+                    err
+                ),
+            },
+            WolvesTurn => {
+                let eatable_persons = get_eatable_alive_persons(&self.client, &village_id).await;
+                println!(
+                    "[🌴 {}]: Hungry wolves in {} village, who to eat?",
+                    village_id,
+                    village.get_village_name(),
+                );
+                println!("[! 🍴] Possible eatable persons:");
+                for eatable in eatable_persons {
+                    println!("{}", eatable.get_id());
                 }
             }
-            WolvesTurn => todo!(),
-            DoctorTurn => todo!(),
-            SeerTurn => todo!(),
+            DoctorTurn => {
+                let all_persons = get_all_alive_persons(&self.client, &village_id).await;
+                println!(
+                    "[🌴 {}]: Doctor in {} village, who to save tonight?",
+                    village_id,
+                    village.get_village_name(),
+                );
+                println!("[! ❤️‍🩹] Possible saveable persons:");
+                for person in all_persons {
+                    match person.get_role() {
+                        person::roles::Role::Doctor => continue,
+                        _ => println!("{}", person.get_id()),
+                    }
+                }
+            }
+            SeerTurn => {
+                let all_persons = get_all_alive_persons(&self.client, &village_id).await;
+                println!(
+                    "[🌴 {}]: Wise seer in {} village, who to ...?",
+                    village_id,
+                    village.get_village_name(),
+                );
+                println!("[! 🔍] Possible ... persons:");
+                for person in all_persons {
+                    match person.get_role() {
+                        person::roles::Role::Seer => continue,
+                        _ => println!("{}", person.get_id()),
+                    }
+                }
+            }
+            ReportNightActionResult(report) => match report {
+                world_inlet::NightActionResult::NoneEaten => {
+                    println!("[🌴 {}]: No one eaten last night.", village_name)
+                }
+                world_inlet::NightActionResult::PersonEaten(person_id) => {
+                    println!(
+                        "[🌴 {}]: A person is eaten last night ({}).",
+                        village_name, person_id
+                    )
+                }
+                world_inlet::NightActionResult::PersonSaved(person_id) => {
+                    println!(
+                        "[🌴 {}]: A person is saved last night ({}).",
+                        village_name, person_id
+                    )
+                }
+                world_inlet::NightActionResult::SeerReport(person_id, is_wolf) => {
+                    let is_wolf_text = match is_wolf {
+                        true => "",
+                        false => " not",
+                    };
+                    println!(
+                        "[🌴 {}]: Seer report: person {} is{} wolf.",
+                        village_name, person_id, is_wolf_text
+                    )
+                }
+            },
         }
     }
 

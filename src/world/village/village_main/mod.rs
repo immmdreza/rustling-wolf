@@ -1,4 +1,5 @@
 mod internal_streamer;
+mod night_events_storage;
 
 use std::time::Duration;
 
@@ -10,16 +11,19 @@ use tokio::{
 
 use crate::{
     mongo_fns::world::{
-        person::{assign_roles, cleanup_persons, count_village_persons},
+        person::{
+            assign_roles, cleanup_persons, count_village_persons, get_person_role, mark_dead,
+        },
         village::{cleanup_village_period, set_or_update_village_period},
     },
     world::{
+        person::roles::Role,
         village::{
             handle_from_world::received_from_world,
             periods::{Daytime, Period, RawPeriod},
-            village_main::internal_streamer::ExitFlag,
+            village_main::{internal_streamer::ExitFlag, night_events_storage::NightEventsStorage},
         },
-        world_inlet::FromVillage,
+        world_inlet::{FromVillage, NightActionResult},
         WorldInlet,
     },
 };
@@ -126,6 +130,14 @@ impl VillageMain {
             .await
     }
 
+    async fn notify_night_action_result(
+        &self,
+        night_action_result: NightActionResult,
+    ) -> Result<(), mpsc::error::SendError<WorldInlet>> {
+        self.notify(FromVillage::ReportNightActionResult(night_action_result))
+            .await
+    }
+
     async fn cleanup_steps(&self) {
         let cli = self.get_client();
         let vid = self.get_village_id();
@@ -169,25 +181,89 @@ impl VillageMain {
         InternalStreamer::new(self, timeout)
     }
 
-    async fn notify_wolves_and_get_choice(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<String, ExitFlag> {
-        self.notify(FromVillage::WolvesTurn).await.unwrap();
-        self.get_streamer(timeout).wait_for_wolves_choice().await
+    async fn apply_and_report_night_action(&self, choices: NightEventsStorage) {
+        use NightActionResult::*;
+
+        // Apply actions ...
+        let (wolves_vitim, saved, seen) = choices.wolves_doctor_seer_choices();
+        match wolves_vitim {
+            Some(wolves_vitim) => match saved {
+                Some(saved) if saved == wolves_vitim => {
+                    // Saved
+                    self.notify_night_action_result(PersonSaved(saved)).await;
+                }
+                _ => {
+                    // Ok, victim is not saved ( or doctor failed to choose ).
+                    // The victim is dead :(
+                    mark_dead(self.get_client(), &wolves_vitim).await.unwrap();
+
+                    self.notify_night_action_result(PersonEaten(wolves_vitim))
+                        .await;
+                }
+            },
+            None => {
+                // None eaten
+                // No need to check for saved ...
+                self.notify_night_action_result(NoneEaten).await;
+            }
+        }
+
+        match seen {
+            Some(seen) => {
+                // Sent report to seer
+                let role = get_person_role(self.get_client(), &seen).await;
+                let is_wolf = match role {
+                    Role::Wolf => true,
+                    _ => false,
+                };
+                self.notify_night_action_result(SeerReport(seen, is_wolf))
+                    .await;
+            }
+            None => {
+                // Seer failed to choose someone ...
+            }
+        }
     }
 
-    async fn notify_doctor_and_get_choice(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<String, ExitFlag> {
-        self.notify(FromVillage::DoctorTurn).await.unwrap();
-        self.get_streamer(timeout).wait_for_doctor_choice().await
-    }
+    async fn preform_night_actions(&mut self, timeout: Duration) {
+        let mut streamer = self.get_streamer(timeout);
+        let mut choices = NightEventsStorage::new();
 
-    async fn notify_seer_and_get_choice(&mut self, timeout: Duration) -> Result<String, ExitFlag> {
-        self.notify(FromVillage::SeerTurn).await.unwrap();
-        self.get_streamer(timeout).wait_for_seer_choice().await
+        // Ask for roles to execute night action ...
+        // 1. Wolves may decide to eat.
+        streamer.vg().notify(FromVillage::WolvesTurn).await.unwrap();
+        if let Ok(person_id) = streamer.wait_for_wolves_choice().await {
+            choices.set_wolves_choice(&person_id)
+        }
+        // Village dead ☠️
+        else if streamer.village_dead() {
+            return;
+        }
+
+        // 2. Doctor may save.
+        streamer.vg().notify(FromVillage::DoctorTurn).await.unwrap();
+        streamer.reset(timeout);
+        if let Ok(person_id) = streamer.wait_for_doctor_choice().await {
+            choices.set_doctor_choice(&person_id)
+        }
+        // Village dead ☠️
+        else if streamer.village_dead() {
+            return;
+        }
+
+        // 3. Detective or Seer may scan roles
+        streamer.vg().notify(FromVillage::SeerTurn).await.unwrap();
+        streamer.reset(timeout);
+        if let Ok(person_id) = streamer.wait_for_seer_choice().await {
+            choices.set_seer_choice(&person_id)
+        }
+        // Village dead ☠️
+        else if streamer.village_dead() {
+            return;
+        }
+
+        // Apply actions ...
+        self.apply_and_report_night_action(choices).await;
     }
 
     pub(super) async fn run(&mut self) {
@@ -280,40 +356,7 @@ impl VillageMain {
                             .unwrap();
 
                         match current_daytime {
-                            Daytime::MidNight => {
-                                // Ask for roles to execute night action ...
-                                // 1. Wolves may decide to eat. 30s
-                                if let Ok(wolves_target) =
-                                    self.notify_wolves_and_get_choice(timeout).await
-                                {
-                                    // Do something with target id ...
-                                }
-                                // Village dead ☠️
-                                else {
-                                    return;
-                                }
-                                // 2. Doctor may save. 20s
-                                if let Ok(doctor_target) =
-                                    self.notify_doctor_and_get_choice(timeout).await
-                                {
-                                    // Do something with target id ...
-                                }
-                                // Village dead ☠️
-                                else {
-                                    return;
-                                }
-
-                                // 3. Detective or Seer may scan roles. 20s
-                                if let Ok(seer_target) =
-                                    self.notify_seer_and_get_choice(timeout).await
-                                {
-                                    // Do something with target id ...
-                                }
-                                // Village dead ☠️
-                                else {
-                                    return;
-                                }
-                            }
+                            Daytime::MidNight => self.preform_night_actions(timeout).await,
                             Daytime::SunRaise => {
                                 // Check game status ...
                                 if self.get_streamer(timeout).timeout_or_die().await {
@@ -322,6 +365,9 @@ impl VillageMain {
                             }
                             Daytime::LynchTime => {
                                 // Request alive players to vote ...
+                                if self.get_streamer(timeout).timeout_or_die().await {
+                                    return;
+                                }
                             }
                         }
                     }

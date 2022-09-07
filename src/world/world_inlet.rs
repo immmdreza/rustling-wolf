@@ -12,6 +12,14 @@ pub enum AddPersonResult {
 }
 
 #[derive(Debug)]
+pub enum NightActionResult {
+    NoneEaten,
+    PersonEaten(String),
+    PersonSaved(String),
+    SeerReport(String, bool),
+}
+
+#[derive(Debug)]
 pub enum FromVillage {
     RawString(String),
     VillageDisposed,
@@ -25,6 +33,8 @@ pub enum FromVillage {
     WolvesTurn,
     DoctorTurn,
     SeerTurn,
+
+    ReportNightActionResult(NightActionResult),
 }
 
 #[derive(Debug)]

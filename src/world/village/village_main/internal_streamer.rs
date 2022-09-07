@@ -108,4 +108,17 @@ impl<'r> InternalStreamer<'r> {
     pub(super) fn get_exit_err(&self) -> &ExitFlag {
         &self.exit_err
     }
+
+    pub(super) fn village_dead(&self) -> bool {
+        match self.exit_err {
+            ExitFlag::VillageDead => true,
+            _ => false,
+        }
+    }
+
+    pub(super) fn reset(&mut self, timeout: Duration) {
+        self.elapsed = Duration::ZERO;
+        self.timeout = timeout;
+        self.exit_err = ExitFlag::NotExited;
+    }
 }

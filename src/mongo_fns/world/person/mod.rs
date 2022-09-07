@@ -1,4 +1,7 @@
-use mongodb::{bson::doc, Client};
+use mongodb::{
+    bson::{doc, oid::ObjectId},
+    Client,
+};
 
 use crate::{
     model,
@@ -10,7 +13,8 @@ model! {
         name: String,
         village_id: String,
         is_alive: bool,
-        role_code: u8
+        role_code: u8,
+        eatable: bool
     }
 }
 
@@ -25,7 +29,7 @@ pub async fn add_person_to_village(
 
     match collection
         .insert_one(
-            PersonDoc::new(name.to_string(), village_id.to_string(), true, 0),
+            PersonDoc::new(name.to_string(), village_id.to_string(), true, 0, false),
             None,
         )
         .await
@@ -34,6 +38,7 @@ pub async fn add_person_to_village(
             inserted.inserted_id.to_string(),
             &village_id.to_string(),
             0,
+            false,
         )),
         Err(_) => None,
     }
@@ -51,6 +56,61 @@ pub async fn count_village_persons(client: &Client, village_id: &str) -> u64 {
         Ok(inserted) => inserted,
         Err(_) => 0,
     }
+}
+
+pub async fn get_eatable_alive_persons(client: &Client, village_id: &str) -> Vec<Person> {
+    let db = client.database("rustling");
+    // Get a handle to a collection in the database.
+    let collection = db.collection::<PersonDoc>("persons");
+
+    let mut persons = vec![];
+    match collection
+        .find(
+            doc! {"village_id": village_id, "eatable": true, "is_alive": true},
+            None,
+        )
+        .await
+    {
+        Ok(mut found) => {
+            while found.advance().await.unwrap() {
+                let curr = found.current();
+                persons.push(Person::new(
+                    curr.get_object_id("_id").unwrap().to_string(),
+                    curr.get_str("village_id").unwrap(),
+                    curr.get_i32("role_code").unwrap().try_into().unwrap(),
+                    curr.get_bool("eatable").unwrap(),
+                ));
+            }
+        }
+        Err(_) => (),
+    };
+    persons
+}
+
+pub async fn get_all_alive_persons(client: &Client, village_id: &str) -> Vec<Person> {
+    let db = client.database("rustling");
+    // Get a handle to a collection in the database.
+    let collection = db.collection::<PersonDoc>("persons");
+
+    let mut persons = vec![];
+    match collection
+        .find(doc! {"village_id": village_id, "is_alive": true}, None)
+        .await
+    {
+        Ok(mut found) => {
+            while found.advance().await.unwrap() {
+                let curr = found.current();
+                persons.push(Person::new(
+                    curr.get_object_id("_id").unwrap().to_string(),
+                    curr.get_str("village_id").unwrap(),
+                    curr.get_i32("role_code").unwrap().try_into().unwrap(),
+                    curr.get_bool("eatable").unwrap(),
+                ));
+            }
+        }
+        Err(_) => (),
+    };
+    persons
 }
 
 pub async fn cleanup_persons(
@@ -104,10 +164,11 @@ pub async fn assign_roles(
         let id = cur.get_object_id("_id").unwrap();
 
         let role_code = roles[counter];
+        let is_eatable = role_code.is_eatable();
         let _ = collection
             .update_one(
                 doc! {"_id": id},
-                doc! {"$set": {"role_code": role_code as u32}},
+                doc! {"$set": {"role_code": role_code as u32, "eatable": is_eatable}},
                 None,
             )
             .await?;
@@ -115,4 +176,35 @@ pub async fn assign_roles(
     }
 
     Ok(roles)
+}
+
+pub async fn mark_dead(client: &Client, person_id: &str) -> Result<(), mongodb::error::Error> {
+    let db = client.database("rustling");
+    // Get a handle to a collection in the database.
+    let collection = db.collection::<PersonDoc>("persons");
+
+    let _ = collection
+        .update_one(
+            doc! {"_id": ObjectId::parse_str(person_id).unwrap() },
+            doc! {"$set": {"is_alive": false}},
+            None,
+        )
+        .await?;
+    Ok(())
+}
+
+pub async fn get_person_role(client: &Client, person_id: &str) -> Role {
+    let db = client.database("rustling");
+    // Get a handle to a collection in the database.
+    let collection = db.collection::<PersonDoc>("persons");
+
+    let found = collection
+        .find_one(doc! {"_id": ObjectId::parse_str(person_id).unwrap()}, None)
+        .await
+        .unwrap();
+
+    match found {
+        Some(found) => Role::from(found.role_code),
+        None => Role::NoRole,
+    }
 }
