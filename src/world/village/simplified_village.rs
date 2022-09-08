@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc::error::SendError;
 
+use crate::world::world_outlet::VillageLiteInfo;
+
 use super::{inlet_data::VillageInlet, Village};
 
 #[derive(Clone)]
@@ -15,13 +17,13 @@ impl SimplifiedVillage {
     }
 
     /// Returns a reference to the get village id of this [`Village`].
-    pub fn get_village_id(&self) -> &String {
-        &self.village.village_id
+    pub fn get_village_id(&self) -> &str {
+        self.village.village_id.as_ref()
     }
 
     /// Returns a reference to the get village name of this [`Village`].
-    pub fn get_village_name(&self) -> &String {
-        &self.village.village_name
+    pub fn get_village_name(&self) -> &str {
+        self.village.village_name.as_ref()
     }
 
     /// Returns the add player's id of this [`Village`].
@@ -46,5 +48,9 @@ impl SimplifiedVillage {
 
     pub async fn die(&self) -> Result<(), SendError<VillageInlet>> {
         self.village.transmit(VillageInlet::Die).await
+    }
+
+    pub fn get_info(&self) -> VillageLiteInfo {
+        VillageLiteInfo::new(self.get_village_id(), self.get_village_name())
     }
 }

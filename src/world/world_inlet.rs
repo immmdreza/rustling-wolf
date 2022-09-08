@@ -40,7 +40,6 @@ pub enum FromVillage {
 #[derive(Debug)]
 pub enum FromHeaven {
     Nothing,
-    RawString(String),
     RequestPerson {
         village_id: String,
         person_name: String,
