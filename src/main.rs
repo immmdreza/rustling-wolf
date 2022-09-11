@@ -1,130 +1,128 @@
-use std::collections::VecDeque;
-
 use rustling_wolf::{
-    console::{get_console_input_receiver, receive_neither_console_or_other},
-    console_answer,
-    quick_resolver::QuickResolver,
-    tower::Antenna,
+    console::prelude::{
+        get_console_input_receiver, receive_neither_console_or_other, ConsoleMotor, Received,
+    },
     world::{
-        by_tower::{AskWorld, WorldAnswered},
-        world_inlet::{FromHeaven, WorldInlet},
-        world_outlet::WorldOutlet,
-        World,
+        person,
+        world_inlet::{self, WorldInlet},
+        world_outlet::{self, WorldOutlet},
+        World, WorldAntenna,
     },
 };
 use tokio::sync::mpsc::Sender;
 
-async fn handle_console_input(
-    tx: &Sender<WorldInlet>,
-    antenna: &Antenna<AskWorld, WorldAnswered>,
-    input: String,
-) {
-    use FromHeaven::*;
-
-    let mut parts = VecDeque::from_iter(input.split(' ').into_iter());
-    let command = parts.pop_front().unwrap();
-
-    match command {
-        "echo" => match parts.pop_front() {
-            Some(txt) => {
-                let res = antenna
-                    .ask(AskWorld::RawString(txt.to_string()))
-                    .await
-                    .unwrap();
-                match res {
-                    WorldAnswered::RawString(replied) => {
-                        println!("World replied with: {}", replied)
-                    }
-                }
-
-                return ();
-            }
-            None => (),
-        },
-        _ => (),
-    };
-
-    tx.send(WorldInlet::FromHeaven(match command {
-        "vg" => parts.pop_front().resolve_world_inlet(
-            |villages_command| match villages_command {
-                "new" => NewVillage,
-                "list" => ListVillages,
-                "kill" => parts.pop_front().resolve_world_inlet(
-                    |res| KillVillage {
-                        village_id: res.to_string(),
-                    },
-                    "Missing village id.",
-                ),
-                "pr" => parts.pop_front().resolve_world_inlet(
-                    |persons_command| match persons_command {
-                        "add" => parts.pop_front().resolve_world_inlet(
-                            |village_id| {
-                                parts.pop_front().resolve_world_inlet(
-                                    |person_name| RequestPerson {
-                                        village_id: village_id.to_string(),
-                                        person_name: person_name.to_string(),
-                                    },
-                                    "Missing person name.",
-                                )
-                            },
-                            "Missing village id",
-                        ),
-                        "fill" => parts.pop_front().resolve_world_inlet(
-                            |village_id| {
-                                parts.pop_front().resolve_world_inlet(
-                                    |count| {
-                                        count.parse::<u8>().resolve_world_inlet(
-                                            |count| FillPersons {
-                                                village_id: village_id.to_string(),
-                                                count,
-                                            },
-                                            "Invalid count given.",
-                                        )
-                                    },
-                                    "Missing count.",
-                                )
-                            },
-                            "Missing village id.",
-                        ),
-                        _ => Nothing,
-                    },
-                    "Missing persons command! (add, fill)",
-                ),
-                _ => {
-                    console_answer!("Unknown village command! (new, list, kill, persons).");
-                    Nothing
-                }
-            },
-            "Unknown command! (villages).",
-        ),
-        _ => {
-            console_answer!("Unknown village command! (new, list, kill, persons).");
-            Nothing
-        }
-    }))
-    .await
-    .unwrap();
-}
-
-async fn handle_world_input(tx: &Sender<WorldInlet>, input: WorldOutlet) {
+async fn handle_world_input(_tx: &Sender<WorldInlet>, antenna: &WorldAntenna, input: WorldOutlet) {
     use rustling_wolf::world::world_outlet::WithVillage::*;
 
     match input {
+        WorldOutlet::RawStringResult(result) => match result {
+            Ok(ok) => println!("[🧁✅]: {ok}"),
+            Err(err) => println!("[🧁❌]: {err}"),
+        },
         WorldOutlet::VillageList(_) => todo!(),
         WorldOutlet::WithVillage { village_id, data } => match data {
-            RawString(_) => todo!(),
-            VillageDisposed => todo!(),
-            PopulationDone(_) => todo!(),
-            PeriodReady(_) => todo!(),
-            NewPeriod(_) => todo!(),
-            PopulationTimedOut => todo!(),
-            DaytimeCycled(_, _) => todo!(),
-            AddPersonResult(_) => todo!(),
-            NightActionResultReport(_) => todo!(),
+            RawString(raw) => println!("[🧀 {village_id}]: {raw}"),
+            VillageDisposed => println!("[🧀 {village_id}]: Disposed!"),
+            PopulationDone(count) => println!("[🧀 {village_id}]: Populated with {count} persons."),
+            PeriodReady(period) => {
+                println!(
+                    "[🧀 {village_id}]: Ready to merge to new period {:?}",
+                    period
+                )
+            }
+            NewPeriod(period) => println!("[🧀 {village_id}]: New period {:?}", period),
+            PopulationTimedOut => println!("[🧀 {village_id}] Failed to populate, disposing ..."),
+            DaytimeCycled(daytime, dur) => {
+                println!(
+                    "[🧀 {village_id}]: New daytime {} for {:#?} long",
+                    daytime, dur
+                )
+            }
+            AddPersonResult(result) => match result {
+                world_inlet::AddPersonResult::Added {
+                    person_id,
+                    current_count,
+                } => {
+                    println!(
+                        "[🧀 {village_id}]: Created person with id {} ({} persons in village).",
+                        person_id, current_count
+                    );
+                }
+                world_inlet::AddPersonResult::Failed(err) => {
+                    println!("[🧀 {village_id}]: Failed creating person: {}.", err);
+                }
+            },
+            NightActionResultReport(report) => match report {
+                world_inlet::NightActionResult::NoneEaten => {
+                    println!("[🧀 {village_id}]: No one eaten last night.");
+                }
+                world_inlet::NightActionResult::PersonEaten(person_id) => {
+                    println!(
+                        "[🧀 {village_id}]: A person is eaten last night ({}).",
+                        person_id
+                    );
+                }
+                world_inlet::NightActionResult::PersonSaved(person_id) => {
+                    println!(
+                        "[🧀 {village_id}]: A person is saved last night ({}).",
+                        person_id
+                    );
+                }
+                world_inlet::NightActionResult::SeerReport(person_id, is_wolf) => {
+                    let is_wolf_text = match is_wolf {
+                        true => "",
+                        false => " not",
+                    };
+                    println!(
+                        "[🧀 {village_id}]: Seer report: person {} is{} wolf.",
+                        person_id, is_wolf_text
+                    );
+                }
+            },
             NightTurn {
                 turn,
                 available_persons,
-            } => todo!(),
+            } => {
+                let village_name = antenna.ask_village_name(&village_id).await.unwrap();
+                match turn {
+                    world_outlet::NightTurn::Wolf => {
+                        println!(
+                            "[🧀 {}]: Hungry wolves in {} village, who to eat?",
+                            village_id, village_name,
+                        );
+                        println!("[! 🍴] Possible eatable persons:");
+                        for eatable in available_persons {
+                            println!("{}", eatable.get_id());
+                        }
+                    }
+                    world_outlet::NightTurn::Doctor => {
+                        println!(
+                            "[🧀 {}]: Doctor in {} village, who to save tonight?",
+                            village_id, village_name,
+                        );
+                        println!("[! ❤️‍🩹] Possible saveable persons:");
+                        for person in available_persons {
+                            match person.get_role() {
+                                person::roles::Role::Doctor => continue,
+                                _ => println!("{}", person.get_id()),
+                            }
+                        }
+                    }
+                    world_outlet::NightTurn::Seer => {
+                        println!(
+                            "[🧀 {}]: Wise seer in {} village, who to ...?",
+                            village_id, village_name,
+                        );
+                        println!("[! 🔍] Possible ... persons:");
+                        for person in available_persons {
+                            match person.get_role() {
+                                person::roles::Role::Seer => continue,
+                                _ => println!("{}", person.get_id()),
+                            }
+                        }
+                    }
+                }
+            }
         },
     }
 }
@@ -133,22 +131,21 @@ async fn handle_world_input(tx: &Sender<WorldInlet>, input: WorldOutlet) {
 async fn main() {
     let (world, mut world_receiver) = World::new().await;
 
-    console_answer!("The world has been initialized, you can command now ...");
     let mut console_receiver = get_console_input_receiver();
 
     let tx = world.sender().clone();
     let antenna = world.antenna().clone();
 
+    let console_motor = ConsoleMotor::new(tx.clone(), antenna.clone());
+
     world.live();
 
     loop {
         match receive_neither_console_or_other(&mut console_receiver, &mut world_receiver).await {
-            rustling_wolf::console::Received::FromConsole(from_console) => {
-                handle_console_input(&tx, &antenna, from_console).await
+            Received::FromConsole(from_console) => {
+                console_motor.dispatch(from_console).await;
             }
-            rustling_wolf::console::Received::FromOther(from_world) => {
-                handle_world_input(&tx, from_world).await
-            }
+            Received::FromOther(from_world) => handle_world_input(&tx, &antenna, from_world).await,
         }
     }
 }

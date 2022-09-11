@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::village::periods::{Daytime, Period, RawPeriod};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AddPersonResult {
     Added {
         person_id: String,
@@ -11,7 +11,7 @@ pub enum AddPersonResult {
     Failed(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NightActionResult {
     NoneEaten,
     PersonEaten(String),
@@ -19,7 +19,7 @@ pub enum NightActionResult {
     SeerReport(String, bool),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FromVillage {
     RawString(String),
     VillageDisposed,
@@ -37,7 +37,7 @@ pub enum FromVillage {
     ReportNightActionResult(NightActionResult),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FromHeaven {
     Nothing,
     RequestPerson {
@@ -55,7 +55,7 @@ pub enum FromHeaven {
     NewVillage,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WorldInlet {
     FromVillage {
         village_id: String,

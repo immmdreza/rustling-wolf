@@ -172,7 +172,7 @@ impl VillageMain {
     }
 
     async fn assign_roles(&self) -> Vec<crate::world::person::roles::Role> {
-        assign_roles(&self.get_client(), &self.get_village_id())
+        assign_roles(self.get_client(), self.get_village_id())
             .await
             .unwrap()
     }
@@ -190,7 +190,9 @@ impl VillageMain {
             Some(wolves_vitim) => match saved {
                 Some(saved) if saved == wolves_vitim => {
                     // Saved
-                    self.notify_night_action_result(PersonSaved(saved)).await;
+                    self.notify_night_action_result(PersonSaved(saved))
+                        .await
+                        .unwrap_or_default();
                 }
                 _ => {
                     // Ok, victim is not saved ( or doctor failed to choose ).
@@ -198,13 +200,16 @@ impl VillageMain {
                     mark_dead(self.get_client(), &wolves_vitim).await.unwrap();
 
                     self.notify_night_action_result(PersonEaten(wolves_vitim))
-                        .await;
+                        .await
+                        .unwrap_or_default();
                 }
             },
             None => {
                 // None eaten
                 // No need to check for saved ...
-                self.notify_night_action_result(NoneEaten).await;
+                self.notify_night_action_result(NoneEaten)
+                    .await
+                    .unwrap_or_default();
             }
         }
 
@@ -212,12 +217,10 @@ impl VillageMain {
             Some(seen) => {
                 // Sent report to seer
                 let role = get_person_role(self.get_client(), &seen).await;
-                let is_wolf = match role {
-                    Role::Wolf => true,
-                    _ => false,
-                };
+                let is_wolf = matches!(role, Role::Wolf);
                 self.notify_night_action_result(SeerReport(seen, is_wolf))
-                    .await;
+                    .await
+                    .unwrap_or_default();
             }
             None => {
                 // Seer failed to choose someone ...
@@ -330,13 +333,12 @@ impl VillageMain {
                         }
                     };
                 }
-                Period::Assignments(_) => loop {
+                Period::Assignments(_) => {
                     let roles = self.assign_roles().await;
                     self.notify(RawString(format!("Roles assigned: {:#?}.", roles)))
                         .await
                         .unwrap();
-                    break;
-                },
+                }
                 Period::FirstNight(dur) => {
                     self.notify(RawString("Wolves may know each other now ...".to_string()))
                         .await

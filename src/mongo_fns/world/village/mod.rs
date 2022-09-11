@@ -35,14 +35,14 @@ pub(crate) async fn set_or_update_village_period(
     let collection = db.collection::<VillagePeriod>("village_periods");
 
     match collection
-        .find_one(doc! {"village_id": village_id.clone()}, None)
+        .find_one(doc! {"village_id": &(*village_id).to_owned()}, None)
         .await
         .unwrap()
     {
         Some(_) => {
             collection
                 .update_one(
-                    doc! {"village_id": village_id.clone()},
+                    doc! {"village_id": &(*village_id).to_owned()},
                     doc! {"$set": {"period": (*period) as i32}},
                     None,
                 )

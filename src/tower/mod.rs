@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 pub use request::Request;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Antenna<TAsked, TAnswered> {
     sender: mpsc::Sender<Request<TAsked, TAnswered>>,
 }
@@ -97,7 +97,7 @@ mod tests {
                 loop {
                     let received = rx.recv().await;
                     match received {
-                        Some(received) => received.answer(format!("{}", args)).await.unwrap(),
+                        Some(received) => received.answer(args.to_string()).await.unwrap(),
                         None => todo!(),
                     }
                 }

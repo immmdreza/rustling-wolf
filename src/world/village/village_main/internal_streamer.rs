@@ -31,7 +31,7 @@ impl<'r> InternalStreamer<'r> {
     }
 
     pub(super) async fn next(&mut self) -> Result<SafeVillageInternal, ExitFlag> {
-        self.timeout = self.timeout - self.elapsed;
+        self.timeout -= self.elapsed;
         self.elapsed = Duration::ZERO;
 
         let start = Instant::now();
@@ -54,14 +54,11 @@ impl<'r> InternalStreamer<'r> {
     }
 
     pub(super) async fn timeout_or_die(&mut self) -> bool {
-        while let Ok(_) = self.next().await {
+        while (self.next().await).is_ok() {
             continue;
         }
 
-        match self.exit_err {
-            ExitFlag::VillageDead => true,
-            _ => false,
-        }
+        matches!(self.exit_err, ExitFlag::VillageDead)
     }
 
     pub(super) async fn wait_for_wolves_choice(&mut self) -> Result<String, ExitFlag> {
@@ -110,10 +107,7 @@ impl<'r> InternalStreamer<'r> {
     }
 
     pub(super) fn village_dead(&self) -> bool {
-        match self.exit_err {
-            ExitFlag::VillageDead => true,
-            _ => false,
-        }
+        matches!(self.exit_err, ExitFlag::VillageDead)
     }
 
     pub(super) fn reset(&mut self, timeout: Duration) {

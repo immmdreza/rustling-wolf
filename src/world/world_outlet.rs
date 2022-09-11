@@ -57,6 +57,7 @@ pub enum WithVillage {
 
 #[derive(Debug)]
 pub enum WorldOutlet {
+    RawStringResult(Result<String, String>),
     VillageList(Vec<VillageLiteInfo>),
     WithVillage {
         village_id: String,

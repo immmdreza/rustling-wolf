@@ -1,7 +1,7 @@
 use self::roles::Role;
 
 pub mod assigner;
-pub(crate) mod roles;
+pub mod roles;
 
 #[derive(Debug)]
 #[allow(dead_code)]

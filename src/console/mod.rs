@@ -1,51 +1,86 @@
-use std::fmt::Debug;
+pub(super) mod enums;
+pub(super) mod parser;
+pub mod prelude;
 
-use tokio::sync::mpsc::Receiver;
+use dptree::prelude::*;
 
-pub fn setup_console_receiver<T>(converter: fn(String) -> T) -> Receiver<T>
+use self::enums::{ConsoleCommand, EndpointParser, RoutingName};
+
+pub type ConsoleHandler = Endpoint<'static, DependencyMap, ()>;
+
+pub(super) fn parse_route_name_and_args<T>(t: T) -> Option<(String, Vec<String>)>
 where
-    T: Debug + Send + Sync + 'static,
+    T: IntoIterator<Item = String>,
 {
-    let (tx, rx) = tokio::sync::mpsc::channel(1024);
-    tokio::spawn(async move {
-        // read from console and send watchers
-        let mut input = String::new();
-        loop {
-            input.clear();
-            std::io::stdin().read_line(&mut input).unwrap();
-            tx.send(converter(input.trim().to_string())).await.unwrap();
+    let mut iterator = t.into_iter();
+
+    let first = iterator.next()?;
+    let args = iterator.collect();
+
+    Some((first, args))
+}
+
+pub(super) fn root() -> ConsoleHandler {
+    dptree::filter_map(|req: String| {
+        let args = req.split(' ').map(|s| s.to_owned()).collect();
+        Some(ConsoleCommand::Routing {
+            name: RoutingName::Root,
+            args,
+        })
+    })
+}
+
+pub(super) fn routing(trigger: &'static str, to: RoutingName) -> ConsoleHandler {
+    dptree::filter_map(move |cmd: ConsoleCommand| match cmd {
+        ConsoleCommand::Routing { name: _, args } => {
+            let (first, args) = parse_route_name_and_args(args)?;
+            if first.to_lowercase() == trigger {
+                Some(ConsoleCommand::Routing {
+                    name: to.to_owned(),
+                    args,
+                })
+            } else {
+                None
+            }
         }
-    });
-
-    rx
+    })
 }
 
-pub fn get_console_input_receiver() -> Receiver<String> {
-    let (tx, rx) = tokio::sync::mpsc::channel(1024);
-    tokio::spawn(async move {
-        // read from console and send watchers
-        let mut input = String::new();
-        loop {
-            input.clear();
-            std::io::stdin().read_line(&mut input).unwrap();
-            tx.send(input.trim().to_string()).await.unwrap();
+pub(super) fn ending<M, T>(trigger: &'static str, mapper: M) -> ConsoleHandler
+where
+    M: Fn(&[String]) -> Option<T> + Sync + Send + 'static,
+    T: Send + Sync + 'static,
+{
+    dptree::filter_map(move |cmd: ConsoleCommand| match cmd {
+        ConsoleCommand::Routing { name: _, args } => {
+            let (cmd, args) = parse_route_name_and_args(args)?;
+            if cmd.to_lowercase() == trigger {
+                mapper(&args)
+            } else {
+                None
+            }
         }
-    });
-
-    rx
+    })
 }
 
-pub enum Received<T> {
-    FromConsole(String),
-    FromOther(T),
+pub(super) fn unmapped_ending(trigger: &'static str) -> ConsoleHandler {
+    ending(trigger, |_| Some(()))
 }
 
-pub async fn receive_neither_console_or_other<T>(
-    console_receiver: &mut Receiver<String>,
-    other_receiver: &mut Receiver<T>,
-) -> Received<T> {
-    tokio::select! {
-        v = console_receiver.recv() => Received::FromConsole(v.unwrap()),
-        v = other_receiver.recv() => Received::FromOther(v.unwrap()),
-    }
+#[allow(dead_code)]
+pub(super) fn classified_ending<F, T>(f: F) -> ConsoleHandler
+where
+    F: EndpointParser<T> + Sync + Send + 'static,
+    T: Send + Sync + 'static,
+{
+    dptree::filter_map(move |cmd: ConsoleCommand| match cmd {
+        ConsoleCommand::Routing { name: _, args } => {
+            let (cmd, args) = parse_route_name_and_args(args)?;
+            if cmd.to_lowercase() == f.get_trigger() {
+                f.map(args)
+            } else {
+                None
+            }
+        }
+    })
 }

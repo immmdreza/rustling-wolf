@@ -85,30 +85,28 @@ pub(super) async fn received_from_world(
                             )))
                             .await
                             .unwrap_or(())
-                        } else {
-                            if let Some(pr) =
-                                add_person_to_village(&client, &village_id, name.as_str()).await
-                            {
-                                send_to_world(AddPerson(AddPersonResult::Added {
-                                    person_id: pr.get_id(),
-                                    current_count: current_person_count + 1,
-                                }))
-                                .await
-                                .unwrap_or(());
+                        } else if let Some(pr) =
+                            add_person_to_village(&client, &village_id, name.as_str()).await
+                        {
+                            send_to_world(AddPerson(AddPersonResult::Added {
+                                person_id: pr.get_id(),
+                                current_count: current_person_count + 1,
+                            }))
+                            .await
+                            .unwrap_or(());
 
-                                if current_person_count + 1 >= max_persons.into() {
-                                    internal_sender
-                                        .send(VillageInternal::PersonsFilled)
-                                        .await
-                                        .unwrap_or(());
-                                }
-                            } else {
-                                send_to_world(AddPerson(AddPersonResult::Failed(
-                                    "Error while inserting person.".to_string(),
-                                )))
-                                .await
-                                .unwrap_or(());
+                            if current_person_count + 1 >= max_persons.into() {
+                                internal_sender
+                                    .send(VillageInternal::PersonsFilled)
+                                    .await
+                                    .unwrap_or(());
                             }
+                        } else {
+                            send_to_world(AddPerson(AddPersonResult::Failed(
+                                "Error while inserting person.".to_string(),
+                            )))
+                            .await
+                            .unwrap_or(());
                         }
                     } else {
                         internal_sender

@@ -12,11 +12,7 @@ pub enum Role {
 
 impl Role {
     pub fn is_eatable(&self) -> bool {
-        match self {
-            Role::Wolf => false,
-            Role::MasterWolf => false,
-            _ => true,
-        }
+        !matches!(self, Role::Wolf | Role::MasterWolf)
     }
 }
 
@@ -33,9 +29,9 @@ impl Display for Role {
     }
 }
 
-impl Into<u8> for Role {
-    fn into(self) -> u8 {
-        match self {
+impl From<Role> for u8 {
+    fn from(r: Role) -> Self {
+        match r {
             Role::NoRole => 0,
             Role::Villager => 1,
             Role::Wolf => 2,

@@ -44,6 +44,7 @@ pub enum RawPeriod {
 }
 
 impl RawPeriod {
+    #[allow(clippy::result_unit_err)]
     pub fn cross(&self) -> Result<Self, ()> {
         use RawPeriod::*;
         match *self {
@@ -57,10 +58,10 @@ impl RawPeriod {
     }
 }
 
-impl Into<i32> for RawPeriod {
-    fn into(self) -> i32 {
+impl From<RawPeriod> for i32 {
+    fn from(r: RawPeriod) -> Self {
         use RawPeriod::*;
-        match self {
+        match r {
             None => 0,
             Populating => 1,
             Assignments => 2,
@@ -99,10 +100,10 @@ pub enum Period {
     Ending,
 }
 
-impl Into<RawPeriod> for Period {
-    fn into(self) -> RawPeriod {
+impl From<Period> for RawPeriod {
+    fn from(p: Period) -> Self {
         use Period::*;
-        match self {
+        match p {
             None => RawPeriod::None,
             Populating {
                 min_persons: _,

@@ -36,7 +36,7 @@ pub async fn add_person_to_village(
     {
         Ok(inserted) => Some(Person::new(
             inserted.inserted_id.to_string(),
-            &village_id.to_string(),
+            village_id,
             0,
             false,
         )),
@@ -49,13 +49,10 @@ pub async fn count_village_persons(client: &Client, village_id: &str) -> u64 {
     // Get a handle to a collection in the database.
     let collection = db.collection::<PersonDoc>("persons");
 
-    match collection
+    (collection
         .count_documents(doc! {"village_id": village_id}, None)
-        .await
-    {
-        Ok(inserted) => inserted,
-        Err(_) => 0,
-    }
+        .await)
+        .unwrap_or(0)
 }
 
 pub async fn get_eatable_alive_persons(client: &Client, village_id: &str) -> Vec<Person> {
@@ -64,25 +61,22 @@ pub async fn get_eatable_alive_persons(client: &Client, village_id: &str) -> Vec
     let collection = db.collection::<PersonDoc>("persons");
 
     let mut persons = vec![];
-    match collection
+    if let Ok(mut found) = collection
         .find(
             doc! {"village_id": village_id, "eatable": true, "is_alive": true},
             None,
         )
         .await
     {
-        Ok(mut found) => {
-            while found.advance().await.unwrap() {
-                let curr = found.current();
-                persons.push(Person::new(
-                    curr.get_object_id("_id").unwrap().to_string(),
-                    curr.get_str("village_id").unwrap(),
-                    curr.get_i32("role_code").unwrap().try_into().unwrap(),
-                    curr.get_bool("eatable").unwrap(),
-                ));
-            }
+        while found.advance().await.unwrap() {
+            let curr = found.current();
+            persons.push(Person::new(
+                curr.get_object_id("_id").unwrap().to_string(),
+                curr.get_str("village_id").unwrap(),
+                curr.get_i32("role_code").unwrap().try_into().unwrap(),
+                curr.get_bool("eatable").unwrap(),
+            ));
         }
-        Err(_) => (),
     };
     persons
 }
@@ -93,22 +87,19 @@ pub async fn get_all_alive_persons(client: &Client, village_id: &str) -> Vec<Per
     let collection = db.collection::<PersonDoc>("persons");
 
     let mut persons = vec![];
-    match collection
+    if let Ok(mut found) = collection
         .find(doc! {"village_id": village_id, "is_alive": true}, None)
         .await
     {
-        Ok(mut found) => {
-            while found.advance().await.unwrap() {
-                let curr = found.current();
-                persons.push(Person::new(
-                    curr.get_object_id("_id").unwrap().to_string(),
-                    curr.get_str("village_id").unwrap(),
-                    curr.get_i32("role_code").unwrap().try_into().unwrap(),
-                    curr.get_bool("eatable").unwrap(),
-                ));
-            }
+        while found.advance().await.unwrap() {
+            let curr = found.current();
+            persons.push(Person::new(
+                curr.get_object_id("_id").unwrap().to_string(),
+                curr.get_str("village_id").unwrap(),
+                curr.get_i32("role_code").unwrap().try_into().unwrap(),
+                curr.get_bool("eatable").unwrap(),
+            ));
         }
-        Err(_) => (),
     };
     persons
 }
@@ -155,7 +146,7 @@ pub async fn assign_roles(
 
     // count the number of villagers in the village
     let villagers = count_village_persons(client, village_id).await;
-    let roles = crate::world::person::assigner::roles(villagers.into());
+    let roles = crate::world::person::assigner::roles(villagers);
 
     // Iterate over the results of the cursor.
     let mut counter = 0;

@@ -2,7 +2,7 @@ use std::future::Future;
 
 use tokio::sync::mpsc::Receiver;
 
-pub struct Transporter {}
+pub struct Transporter;
 
 impl Transporter {
     pub fn spawn<K, G, Gut, Args>(
@@ -17,7 +17,7 @@ impl Transporter {
         Gut: Future<Output = ()> + Send,
         Args: Sync + Send + Clone + 'static,
     {
-        let spawned = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 let received = receiver.recv().await;
                 match received {
@@ -31,8 +31,6 @@ impl Transporter {
                     }
                 }
             }
-        });
-
-        spawned
+        })
     }
 }
